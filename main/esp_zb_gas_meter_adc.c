@@ -33,7 +33,7 @@ uint8_t battery_voltage_th1 = 72;
 
 struct timeval last_battery_measurement_time;
 
-adc_channel_t channel = ADC_CHANNEL_0; // ADC_CHANNEL_3 is a better option, but the current board was using 0 so let's change it now GPIO 3
+adc_channel_t channel = ADC_CHANNEL_2; // ADC_CHANNEL_3 is a better option, but the current board was using 0 so let's change it now GPIO 3
 adc_continuous_handle_t handle = NULL;
 
 esp_err_t bat_adc_calibration_init(const adc_unit_t unit, const adc_channel_t channel, const adc_atten_t atten, adc_cali_handle_t *out_handle)
@@ -149,12 +149,12 @@ void adc_task(void *arg)
             int voltage;
             ESP_ERROR_CHECK(adc_cali_raw_to_voltage(adc1_cali_chan0_handle, average, &voltage));
             // convert to 2s lipo ranges and mult by 10
-            float bat_voltage = (float)(0.036207)*voltage; 
+            float bat_voltage = ((float)(3.6084)*voltage + (float)0.062)/(float)(100.0); 
             battery_voltage = (uint8_t)(bat_voltage+(float)0.5);
-            battery_percentage = (uint8_t)((bat_voltage-(float)(70.0))*(float)(14.28571429));
+            battery_percentage = (uint8_t)((bat_voltage-(float)(70.0))*(float)(13.6433)) + 7;
             if (battery_percentage > 200)
                 battery_percentage = 200;
-            xEventGroupSetBits(report_event_group_handle, BATTER_REPORT);
+            xEventGroupSetBits(report_event_group_handle, BATTERY_REPORT);
 
             if (battery_voltage < battery_voltage_th1) {
                 battery_alarm_state |= (1 << 1); // BatteryVoltageThreshold1 or BatteryPercentageThreshold1 reached for Battery Source 1

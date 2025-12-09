@@ -35,6 +35,7 @@ esp_zb_uint48_t current_summation_delivered = {
 	.low = 0,
 	.high = 0
 };
+float current_summation_delivered_float = 0;
 uint8_t device_status = 0x0;
 uint64_t device_extended_status = 0x0;
 esp_zb_int24_t instantaneous_demand = {
@@ -134,7 +135,7 @@ esp_err_t zb_read_attr_resp_handler(const esp_zb_zcl_cmd_read_attr_resp_message_
 
 void zb_log_esp_zb_zcl_cmd_info_t(const char* prefix, const esp_zb_zcl_cmd_info_t *info)
 {
-    ESP_LOGI(TAG, "%s:\n  From address(0x%x) src endpoint(%d)\n  To address (0x%x) endpoint(%d)\n    cluster(0x%x) profile(0x%x) transaction(%d)\n    cmd id(0x%x) direction(0x%x) is_common(0x%x)",
+    ESP_LOGD(TAG, "%s:\n  From address(0x%x) src endpoint(%d)\n  To address (0x%x) endpoint(%d)\n    cluster(0x%x) profile(0x%x) transaction(%d)\n    cmd id(0x%x) direction(0x%x) is_common(0x%x)",
         prefix,
         info->src_address.u.short_addr, 
         info->src_endpoint,
@@ -215,108 +216,226 @@ esp_err_t zb_cmd_default_resp_handler(const esp_zb_zcl_cmd_default_resp_message_
 esp_zb_zcl_status_t zb_radio_setup_report_values(EventBits_t uxBits)
 {
     esp_zb_zcl_status_t status = ESP_ZB_ZCL_STATUS_SUCCESS;
-    if ((uxBits & CURRENT_SUMMATION_DELIVERED_REPORT) != 0) {
-        status = esp_zb_zcl_set_attribute_val(MY_METERING_ENDPOINT,
-            ESP_ZB_ZCL_CLUSTER_ID_METERING, ESP_ZB_ZCL_CLUSTER_SERVER_ROLE,
-            ESP_ZB_ZCL_ATTR_METERING_CURRENT_SUMMATION_DELIVERED_ID, &current_summation_delivered, false);
+    if ((uxBits & CURRENT_SUMMATION_DELIVERED_REPORT) == CURRENT_SUMMATION_DELIVERED_REPORT) {
+        if (esp_zb_lock_acquire(portMAX_DELAY)) {
+            status = esp_zb_zcl_set_attribute_val(MY_METERING_ENDPOINT,
+                ESP_ZB_ZCL_CLUSTER_ID_METERING, ESP_ZB_ZCL_CLUSTER_SERVER_ROLE,
+                ESP_ZB_ZCL_ATTR_METERING_CURRENT_SUMMATION_DELIVERED_ID, &current_summation_delivered, false);
+            esp_zb_lock_release();
+        } else {
+            status = ESP_ZB_ZCL_STATUS_FAIL;
+        }
         if (status != ESP_ZB_ZCL_STATUS_SUCCESS) {
-            ESP_LOGE(TAG, "Updating value of current summation delivered: %d", status);
+            ESP_LOGE(TAG, "Updating value of current summation delivered: 0x%04x", status);
+            return status;
+        }
+        if (esp_zb_lock_acquire(portMAX_DELAY)) {
+            status = esp_zb_zcl_set_attribute_val(MY_METERING_ENDPOINT,
+                ESP_ZB_ZCL_CLUSTER_ID_ANALOG_INPUT, ESP_ZB_ZCL_CLUSTER_SERVER_ROLE,
+                ESP_ZB_ZCL_ATTR_ANALOG_INPUT_PRESENT_VALUE_ID, &current_summation_delivered_float, false);
+            esp_zb_lock_release();
+        } else {
+            status = ESP_ZB_ZCL_STATUS_FAIL;
+        }
+        if (status != ESP_ZB_ZCL_STATUS_SUCCESS) {
+            ESP_LOGE(TAG, "Updating float value of current summation delivered: 0x%04x", status);
             return status;
         }
     }
-    if ((uxBits & INSTANTANEOUS_DEMAND_REPORT) != 0) {
-        status = esp_zb_zcl_set_attribute_val(MY_METERING_ENDPOINT,
-            ESP_ZB_ZCL_CLUSTER_ID_METERING, ESP_ZB_ZCL_CLUSTER_SERVER_ROLE,
-            ESP_ZB_ZCL_ATTR_METERING_INSTANTANEOUS_DEMAND_ID, &instantaneous_demand, false);
+    if ((uxBits & INSTANTANEOUS_DEMAND_REPORT) == INSTANTANEOUS_DEMAND_REPORT) {
+        if (esp_zb_lock_acquire(portMAX_DELAY)) {
+            status = esp_zb_zcl_set_attribute_val(MY_METERING_ENDPOINT,
+                ESP_ZB_ZCL_CLUSTER_ID_METERING, ESP_ZB_ZCL_CLUSTER_SERVER_ROLE,
+                ESP_ZB_ZCL_ATTR_METERING_INSTANTANEOUS_DEMAND_ID, &instantaneous_demand, false);
+            esp_zb_lock_release();
+        } else {
+            status = ESP_ZB_ZCL_STATUS_FAIL;
+        }
         if (status != ESP_ZB_ZCL_STATUS_SUCCESS) {
-            ESP_LOGE(TAG, "Updating value of instantaneous demand: %d", status);
+            ESP_LOGE(TAG, "Updating value of instantaneous demand: 0x%04x", status);
             return status;
         }
     }
-    if ((uxBits & BATTER_REPORT) != 0) {
-        status = esp_zb_zcl_set_attribute_val(MY_METERING_ENDPOINT,
-            ESP_ZB_ZCL_CLUSTER_ID_POWER_CONFIG, ESP_ZB_ZCL_CLUSTER_SERVER_ROLE,
-            ESP_ZB_ZCL_ATTR_POWER_CONFIG_BATTERY_PERCENTAGE_REMAINING_ID, &battery_percentage, false);
-        if (status != ESP_ZB_ZCL_STATUS_SUCCESS) {
-            ESP_LOGE(TAG, "Updating value of battery percentage: %d", status);
+    if ((uxBits & BATTERY_REPORT) == BATTERY_REPORT) {
+        if (esp_zb_lock_acquire(portMAX_DELAY)) {
+            status = esp_zb_zcl_set_attribute_val(MY_METERING_ENDPOINT,
+                ESP_ZB_ZCL_CLUSTER_ID_POWER_CONFIG, ESP_ZB_ZCL_CLUSTER_SERVER_ROLE,
+                ESP_ZB_ZCL_ATTR_POWER_CONFIG_BATTERY_PERCENTAGE_REMAINING_ID, &battery_percentage, false);
+            esp_zb_lock_release();
+        } else {
+            status = ESP_ZB_ZCL_STATUS_FAIL;
         }
-        status = esp_zb_zcl_set_attribute_val(MY_METERING_ENDPOINT,
-            ESP_ZB_ZCL_CLUSTER_ID_POWER_CONFIG, ESP_ZB_ZCL_CLUSTER_SERVER_ROLE,
-            ESP_ZB_ZCL_ATTR_POWER_CONFIG_BATTERY_VOLTAGE_ID, &battery_voltage, false);
         if (status != ESP_ZB_ZCL_STATUS_SUCCESS) {
-            ESP_LOGE(TAG, "Updating value of battery voltage: %d", status);
+            ESP_LOGE(TAG, "Updating value of battery percentage: 0x%04x", status);
         }
-        status = esp_zb_zcl_set_attribute_val(MY_METERING_ENDPOINT,
-            ESP_ZB_ZCL_CLUSTER_ID_POWER_CONFIG, ESP_ZB_ZCL_CLUSTER_SERVER_ROLE,
-            ESP_ZB_ZCL_ATTR_POWER_CONFIG_BATTERY_ALARM_STATE_ID, &battery_alarm_state, false);
+        if (esp_zb_lock_acquire(portMAX_DELAY)) {
+            status = esp_zb_zcl_set_attribute_val(MY_METERING_ENDPOINT,
+                ESP_ZB_ZCL_CLUSTER_ID_POWER_CONFIG, ESP_ZB_ZCL_CLUSTER_SERVER_ROLE,
+                ESP_ZB_ZCL_ATTR_POWER_CONFIG_BATTERY_VOLTAGE_ID, &battery_voltage, false);
+            esp_zb_lock_release();
+        } else {
+            status = ESP_ZB_ZCL_STATUS_FAIL;
+        }
         if (status != ESP_ZB_ZCL_STATUS_SUCCESS) {
-            ESP_LOGE(TAG, "Updating value of battery alarm state: %d", status);
+            ESP_LOGE(TAG, "Updating value of battery voltage: 0x%04x", status);
+        }
+        if (esp_zb_lock_acquire(portMAX_DELAY)) {
+            status = esp_zb_zcl_set_attribute_val(MY_METERING_ENDPOINT,
+                ESP_ZB_ZCL_CLUSTER_ID_POWER_CONFIG, ESP_ZB_ZCL_CLUSTER_SERVER_ROLE,
+                ESP_ZB_ZCL_ATTR_POWER_CONFIG_BATTERY_ALARM_STATE_ID, &battery_alarm_state, false);
+            esp_zb_lock_release();
+        } else {
+            status = ESP_ZB_ZCL_STATUS_FAIL;
+        }
+        if (status != ESP_ZB_ZCL_STATUS_SUCCESS) {
+            ESP_LOGE(TAG, "Updating value of battery alarm state: 0x%04x", status);
         }
     }
-    if ((uxBits & STATUS_REPORT) != 0) {
-        status = esp_zb_zcl_set_attribute_val(MY_METERING_ENDPOINT,
-            ESP_ZB_ZCL_CLUSTER_ID_METERING, ESP_ZB_ZCL_CLUSTER_SERVER_ROLE,
-            ESP_ZB_ZCL_ATTR_METERING_STATUS_ID, &device_status, false);
+    if ((uxBits & STATUS_REPORT) == STATUS_REPORT) {
+        if (esp_zb_lock_acquire(portMAX_DELAY)) {
+            status = esp_zb_zcl_set_attribute_val(MY_METERING_ENDPOINT,
+                ESP_ZB_ZCL_CLUSTER_ID_METERING, ESP_ZB_ZCL_CLUSTER_SERVER_ROLE,
+                ESP_ZB_ZCL_ATTR_METERING_STATUS_ID, &device_status, false);
+            esp_zb_lock_release();
+        } else {
+            status = ESP_ZB_ZCL_STATUS_FAIL;
+        }
         if (status != ESP_ZB_ZCL_STATUS_SUCCESS) {
-            ESP_LOGE(TAG, "Updating value of status: %d", status);
+            ESP_LOGE(TAG, "Updating value of status: 0x%04x", status);
         }
     }
-    if ((uxBits & EXTENDED_STATUS_REPORT) != 0) {
-        status = esp_zb_zcl_set_attribute_val(MY_METERING_ENDPOINT,
-            ESP_ZB_ZCL_CLUSTER_ID_METERING, ESP_ZB_ZCL_CLUSTER_SERVER_ROLE,
-            ESP_ZB_ZCL_ATTR_METERING_EXTENDED_STATUS_ID, &device_extended_status, false);
+    if ((uxBits & EXTENDED_STATUS_REPORT) == EXTENDED_STATUS_REPORT) {
+        if (esp_zb_lock_acquire(portMAX_DELAY)) {
+            status = esp_zb_zcl_set_attribute_val(MY_METERING_ENDPOINT,
+                ESP_ZB_ZCL_CLUSTER_ID_METERING, ESP_ZB_ZCL_CLUSTER_SERVER_ROLE,
+                ESP_ZB_ZCL_ATTR_METERING_EXTENDED_STATUS_ID, &device_extended_status, false);
+        } else {
+            status = ESP_ZB_ZCL_STATUS_FAIL;
+        }
         if (status != ESP_ZB_ZCL_STATUS_SUCCESS) {
-            ESP_LOGE(TAG, "Updating value of extended status: %d", status);
+            ESP_LOGE(TAG, "Updating value of extended status: 0x%04x", status);
         }
     }
     return status;
 }
 
 // report attributes to radio
-void zb_radio_send_values(EventBits_t uxBits)
+esp_zb_zcl_status_t zb_radio_send_values(EventBits_t uxBits)
 {
+    esp_zb_zcl_status_t status = ESP_ZB_ZCL_STATUS_SUCCESS;
+    // ESP_LOGI(TAG, "uxBits=0x%04lx",uxBits);
     esp_zb_zcl_report_attr_cmd_t report_attr_cmd = {0};
     report_attr_cmd.address_mode = ESP_ZB_APS_ADDR_MODE_DST_ADDR_ENDP_NOT_PRESENT;
     report_attr_cmd.direction = ESP_ZB_ZCL_CMD_DIRECTION_TO_CLI;
     report_attr_cmd.clusterID = ESP_ZB_ZCL_CLUSTER_ID_METERING;
     report_attr_cmd.zcl_basic_cmd.src_endpoint = MY_METERING_ENDPOINT;
 
-    if ((uxBits & CURRENT_SUMMATION_DELIVERED_REPORT) != 0) {
+    if ((uxBits & CURRENT_SUMMATION_DELIVERED_REPORT) == CURRENT_SUMMATION_DELIVERED_REPORT) {
         report_attr_cmd.attributeID = ESP_ZB_ZCL_ATTR_METERING_CURRENT_SUMMATION_DELIVERED_ID;
         report_attr_cmd.clusterID = ESP_ZB_ZCL_CLUSTER_ID_METERING;
-        ESP_ERROR_CHECK(esp_zb_zcl_report_attr_cmd_req(&report_attr_cmd));
+        if (esp_zb_lock_acquire(portMAX_DELAY)) {
+            status = esp_zb_zcl_report_attr_cmd_req(&report_attr_cmd);
+            esp_zb_lock_release();
+        } else {
+            status = ESP_ZB_ZCL_STATUS_FAIL;
+        }
+        if (status != ESP_ZB_ZCL_STATUS_SUCCESS) {
+            ESP_LOGE(TAG, "Sending report value of current summation delivered: 0x%04x", status);
+            return status;
+        }
         ESP_LOGI(TAG, "CurrentSummationDelivered reported");
+        report_attr_cmd.attributeID = ESP_ZB_ZCL_ATTR_ANALOG_INPUT_PRESENT_VALUE_ID;
+        report_attr_cmd.clusterID = ESP_ZB_ZCL_CLUSTER_ID_ANALOG_INPUT;
+        if (esp_zb_lock_acquire(portMAX_DELAY)) {
+            status = esp_zb_zcl_report_attr_cmd_req(&report_attr_cmd);
+            esp_zb_lock_release();
+        } else {
+            status = ESP_ZB_ZCL_STATUS_FAIL;
+        }
+        if (status != ESP_ZB_ZCL_STATUS_SUCCESS) {
+            ESP_LOGE(TAG, "Sending report float value of current summation delivered: 0x%04x", status);
+            return status;
+        }
+        ESP_LOGI(TAG, "CurrentSummationDelivered float reported");
     }
 
-    if ((uxBits & INSTANTANEOUS_DEMAND_REPORT) != 0) {
+    if ((uxBits & INSTANTANEOUS_DEMAND_REPORT) == INSTANTANEOUS_DEMAND_REPORT) {
+        report_attr_cmd.clusterID = ESP_ZB_ZCL_CLUSTER_ID_METERING;
         report_attr_cmd.attributeID = ESP_ZB_ZCL_ATTR_METERING_INSTANTANEOUS_DEMAND_ID;
-        ESP_ERROR_CHECK(esp_zb_zcl_report_attr_cmd_req(&report_attr_cmd));
+        if (esp_zb_lock_acquire(portMAX_DELAY)) {
+            status = esp_zb_zcl_report_attr_cmd_req(&report_attr_cmd);
+            esp_zb_lock_release();
+        } else {
+            status = ESP_ZB_ZCL_STATUS_FAIL;
+        }
+        if (status != ESP_ZB_ZCL_STATUS_SUCCESS) {
+            ESP_LOGE(TAG, "Sending report value of instantaneous demand: 0x%04x", status);
+            return status;
+        }
         ESP_LOGI(TAG, "InstantaneousDemand reported");
     }
 
-    if ((uxBits & BATTER_REPORT) != 0) {
+    if ((uxBits & BATTERY_REPORT) == BATTERY_REPORT) {
         report_attr_cmd.attributeID = ESP_ZB_ZCL_ATTR_POWER_CONFIG_BATTERY_PERCENTAGE_REMAINING_ID;
         report_attr_cmd.clusterID = ESP_ZB_ZCL_CLUSTER_ID_POWER_CONFIG;
-        ESP_ERROR_CHECK(esp_zb_zcl_report_attr_cmd_req(&report_attr_cmd));
+        if (esp_zb_lock_acquire(portMAX_DELAY)) {
+            status = esp_zb_zcl_report_attr_cmd_req(&report_attr_cmd);
+            esp_zb_lock_release();
+        } else {
+            status = ESP_ZB_ZCL_STATUS_FAIL;
+        }
+        if (status != ESP_ZB_ZCL_STATUS_SUCCESS) {
+            ESP_LOGE(TAG, "Sending report value of battery percentage remaining: 0x%04x", status);
+            return status;
+        }
         ESP_LOGI(TAG, "BatteryPercentageRemaining reported");
         report_attr_cmd.attributeID = ESP_ZB_ZCL_ATTR_POWER_CONFIG_BATTERY_ALARM_STATE_ID;
-        ESP_ERROR_CHECK(esp_zb_zcl_report_attr_cmd_req(&report_attr_cmd));
+        if (esp_zb_lock_acquire(portMAX_DELAY)) {
+            status = esp_zb_zcl_report_attr_cmd_req(&report_attr_cmd);
+            esp_zb_lock_release();
+        } else {
+            status = ESP_ZB_ZCL_STATUS_FAIL;
+        }
+        if (status != ESP_ZB_ZCL_STATUS_SUCCESS) {
+            ESP_LOGE(TAG, "Sending report value of battery alarm state: 0x%04x", status);
+            return status;
+        }
         ESP_LOGI(TAG, "BatteryAlarmState reported");
     }
 
-    if ((uxBits & STATUS_REPORT) != 0) {
+    if ((uxBits & STATUS_REPORT) == STATUS_REPORT) {
         report_attr_cmd.attributeID = ESP_ZB_ZCL_ATTR_METERING_STATUS_ID;
         report_attr_cmd.clusterID = ESP_ZB_ZCL_CLUSTER_ID_METERING;
-        ESP_ERROR_CHECK(esp_zb_zcl_report_attr_cmd_req(&report_attr_cmd));
+        if (esp_zb_lock_acquire(portMAX_DELAY)) {
+            status = esp_zb_zcl_report_attr_cmd_req(&report_attr_cmd);
+            esp_zb_lock_release();
+        } else {
+            status = ESP_ZB_ZCL_STATUS_FAIL;
+        }
+        if (status != ESP_ZB_ZCL_STATUS_SUCCESS) {
+            ESP_LOGE(TAG, "Sending report value of metering status: 0x%04x", status);
+            return status;
+        }
         ESP_LOGI(TAG, "Status reported");
     }
 
-    if ((uxBits & EXTENDED_STATUS_REPORT) != 0) {
+    if ((uxBits & EXTENDED_STATUS_REPORT) == EXTENDED_STATUS_REPORT) {
         report_attr_cmd.attributeID = ESP_ZB_ZCL_ATTR_METERING_EXTENDED_STATUS_ID;
         report_attr_cmd.clusterID = ESP_ZB_ZCL_CLUSTER_ID_METERING;
-        ESP_ERROR_CHECK(esp_zb_zcl_report_attr_cmd_req(&report_attr_cmd));
+        if (esp_zb_lock_acquire(portMAX_DELAY)) {
+            status = esp_zb_zcl_report_attr_cmd_req(&report_attr_cmd);
+            esp_zb_lock_release();
+        } else {
+            status = ESP_ZB_ZCL_STATUS_FAIL;
+        }
+        if (status != ESP_ZB_ZCL_STATUS_SUCCESS) {
+            ESP_LOGE(TAG, "Sending report value of metering extended status: 0x%04x", status);
+            return status;
+        }
         ESP_LOGI(TAG, "ExtendedStatus reported");
     }
+
+    return status;
 }
 
 // Attribute handler
@@ -585,6 +704,23 @@ void esp_zb_task(void *pvParameters)
     /* client identify cluster */
     esp_zb_attribute_list_t *esp_zb_identify_client_cluster = esp_zb_zcl_attr_list_create(ESP_ZB_ZCL_CLUSTER_ID_IDENTIFY);
 
+    esp_zb_analog_input_cluster_cfg_t analog_in_cfg = {
+        .out_of_service = ESP_ZB_ZCL_ANALOG_INPUT_OUT_OF_SERVICE_DEFAULT_VALUE,
+        .status_flags = ESP_ZB_ZCL_ANALOG_INPUT_STATUS_FLAG_DEFAULT_VALUE,
+        .present_value = current_summation_delivered_float};
+    esp_zb_attribute_list_t *analog_in_cluster = esp_zb_analog_input_cluster_create(&analog_in_cfg);
+    float min_ai_val = 0x00; 
+    float max_ai_val = 16777216;
+    uint16_t no_units = 0x005f;
+    // ESP_ERROR_CHECK(esp_zb_analog_input_cluster_add_attr(analog_in_cluster, ESP_ZB_ZCL_ATTR_ANALOG_INPUT_APPLICATION_TYPE_ID, 
+    //     ESP_ZB_ZCL_AI_SET_APP_TYPE_WITH_ID(ESP_ZB_ZCL_AI_APP_TYPE_COUNT_UNITLESS, (int16_t)0x00)
+    // ));
+    ESP_ERROR_CHECK(esp_zb_analog_input_cluster_add_attr(analog_in_cluster, ESP_ZB_ZCL_ATTR_ANALOG_INPUT_DESCRIPTION_ID, "\x0D""Gas consuption"));
+    ESP_ERROR_CHECK(esp_zb_analog_input_cluster_add_attr(analog_in_cluster, ESP_ZB_ZCL_ATTR_ANALOG_INPUT_MAX_PRESENT_VALUE_ID, &max_ai_val));
+    ESP_ERROR_CHECK(esp_zb_analog_input_cluster_add_attr(analog_in_cluster, ESP_ZB_ZCL_ATTR_ANALOG_INPUT_MIN_PRESENT_VALUE_ID, &min_ai_val));
+    ESP_ERROR_CHECK(esp_zb_analog_input_cluster_add_attr(analog_in_cluster, ESP_ZB_ZCL_ATTR_ANALOG_INPUT_ENGINEERING_UNITS_ID, &no_units));
+
+
     /* ota cluster */
     // const esp_app_desc_t *app_desc = esp_app_get_description();
 
@@ -611,6 +747,7 @@ void esp_zb_task(void *pvParameters)
     ESP_ERROR_CHECK(esp_zb_cluster_list_add_metering_cluster(esp_zb_meter_cluster_list, esp_zb_metering_server_cluster, ESP_ZB_ZCL_CLUSTER_SERVER_ROLE));
     ESP_ERROR_CHECK(esp_zb_cluster_list_add_power_config_cluster(esp_zb_meter_cluster_list, esp_zb_power_cluster, ESP_ZB_ZCL_CLUSTER_SERVER_ROLE));
     ESP_ERROR_CHECK(esp_zb_cluster_list_add_ota_cluster(esp_zb_meter_cluster_list, esp_zb_ota_cluster, ESP_ZB_ZCL_CLUSTER_CLIENT_ROLE));
+    ESP_ERROR_CHECK(esp_zb_cluster_list_add_analog_input_cluster(esp_zb_meter_cluster_list, analog_in_cluster, ESP_ZB_ZCL_CLUSTER_SERVER_ROLE));
 
     esp_zb_ep_list_t *esp_zb_ep_meter_list = esp_zb_ep_list_create();
     esp_zb_endpoint_config_t endpoint_config = {
@@ -694,7 +831,16 @@ void esp_zb_task(void *pvParameters)
     };
     ESP_ERROR_CHECK(esp_zb_zcl_start_attr_reporting(extended_status_location_info));
 
-    esp_zb_set_tx_power(IEEE802154_TXPOWER_VALUE_MIN);
+    esp_zb_zcl_attr_location_info_t analog_status_location_info = {
+        .attr_id = ESP_ZB_ZCL_ATTR_ANALOG_INPUT_PRESENT_VALUE_ID,
+        .cluster_id = ESP_ZB_ZCL_CLUSTER_ID_ANALOG_INPUT,
+        .cluster_role = ESP_ZB_ZCL_CLUSTER_SERVER_ROLE,
+        .endpoint_id = MY_METERING_ENDPOINT,
+        .manuf_code = ESP_ZB_ZCL_ATTR_NON_MANUFACTURER_SPECIFIC
+    };
+    ESP_ERROR_CHECK(esp_zb_zcl_start_attr_reporting(analog_status_location_info));
+
+    esp_zb_set_tx_power(IEEE802154_TXPOWER_VALUE_MAX);
     ESP_ERROR_CHECK(esp_zb_set_primary_network_channel_set(ESP_ZB_PRIMARY_CHANNEL_MASK));
     ESP_ERROR_CHECK(esp_zb_set_secondary_network_channel_set(ESP_ZB_PRIMARY_CHANNEL_MASK));
 
@@ -719,37 +865,38 @@ void gm_main_loop_zigbee_task(void *arg)
         // all bits to be set.
         EventBits_t uxBits = xEventGroupWaitBits(
             report_event_group_handle, 
-            CURRENT_SUMMATION_DELIVERED_REPORT | INSTANTANEOUS_DEMAND_REPORT | STATUS_REPORT | EXTENDED_STATUS_REPORT | BATTER_REPORT,
+            CURRENT_SUMMATION_DELIVERED_REPORT | INSTANTANEOUS_DEMAND_REPORT | STATUS_REPORT | EXTENDED_STATUS_REPORT | BATTERY_REPORT,
             pdTRUE,
             pdTRUE,
             pdMS_TO_TICKS(250)
         );
-        if (uxBits != 0) {
-            // Note we must manually clear the bits to avoid infinite loop
-            xEventGroupClearBits(report_event_group_handle, uxBits);
-            ESP_LOGI(TAG, "Reporting to client Sum=%s, Instant=%s, Bat=%s, Status=%s, Exten=%s", 
-                ((uxBits & CURRENT_SUMMATION_DELIVERED_REPORT) != 0) ? "Yes": "No",
-                ((uxBits & INSTANTANEOUS_DEMAND_REPORT) != 0) ? "Yes": "No",
-                ((uxBits & BATTER_REPORT) != 0) ? "Yes": "No",
-                ((uxBits & STATUS_REPORT) != 0) ? "Yes": "No",
-                ((uxBits & EXTENDED_STATUS_REPORT) != 0) ? "Yes": "No"
-            );
-            if (esp_zb_lock_acquire(portMAX_DELAY)) 
-            {
+        if (!leaving_network) {
+            if (uxBits != 0) {
+                // Note we must manually clear the bits to avoid infinite loop
+                xEventGroupClearBits(report_event_group_handle, uxBits);
+                ESP_LOGI(TAG, "Reporting to client Sum=%s, Instant=%s, Bat=%s, Status=%s, Exten=%s", 
+                    ((uxBits & CURRENT_SUMMATION_DELIVERED_REPORT) != 0) ? "Yes": "No",
+                    ((uxBits & INSTANTANEOUS_DEMAND_REPORT) != 0) ? "Yes": "No",
+                    ((uxBits & BATTERY_REPORT) != 0) ? "Yes": "No",
+                    ((uxBits & STATUS_REPORT) != 0) ? "Yes": "No",
+                    ((uxBits & EXTENDED_STATUS_REPORT) != 0) ? "Yes": "No"
+                );
                 esp_zb_zcl_status_t status = zb_radio_setup_report_values(uxBits);
                 if (status == ESP_ZB_ZCL_STATUS_SUCCESS) {
-                    zb_radio_send_values(uxBits);
+                    status = zb_radio_send_values(uxBits);
                 }
-                esp_zb_lock_release();
-                gettimeofday(&last_report_sent_time, NULL);
-                last_summation_sent = current_summation_delivered.high;
-                last_summation_sent <<= 32;
-                last_summation_sent |= current_summation_delivered.low;
-            }
-            if (deep_sleep_task_handle != NULL) {
-                TickType_t deep_sleep_time = dm_deep_sleep_time_ms();
-                if (xQueueSendToFront(deep_sleep_queue_handle, &deep_sleep_time, pdMS_TO_TICKS(100)) != pdTRUE)
-                    ESP_LOGE(TAG, "Can't reschedule deep sleep timer");
+                if (status == ESP_ZB_ZCL_STATUS_SUCCESS) {
+                    gettimeofday(&last_report_sent_time, NULL);
+                    last_summation_sent = current_summation_delivered.high;
+                    last_summation_sent <<= 32;
+                    last_summation_sent |= current_summation_delivered.low;
+                }
+
+                if (deep_sleep_task_handle != NULL) {
+                    TickType_t deep_sleep_time = dm_deep_sleep_time_ms();
+                    if (xQueueSendToFront(deep_sleep_queue_handle, &deep_sleep_time, pdMS_TO_TICKS(100)) != pdTRUE)
+                        ESP_LOGE(TAG, "Can't reschedule deep sleep timer");
+                }
             }
         }
     }
@@ -805,7 +952,11 @@ void esp_zb_app_signal_handler(esp_zb_app_signal_t *signal_struct)
             esp_zb_scheduler_alarm((esp_zb_callback_t)bdb_start_top_level_commissioning_cb, ESP_ZB_BDB_MODE_NETWORK_STEERING, 1000);
         }
         break;
+    case ESP_ZB_ZDO_SIGNAL_LEAVE_INDICATION:
+        ESP_LOGI(TAG, "Leave indication signal received");
+        break;
     case ESP_ZB_ZDO_SIGNAL_LEAVE:
+        ESP_LOGI(TAG, "Signal leave received");
         esp_zb_zdo_signal_leave_params_t *leave_params = (esp_zb_zdo_signal_leave_params_t *)esp_zb_app_signal_get_params(p_sg_p);
         if (leave_params && leave_params->leave_type == ESP_ZB_NWK_LEAVE_TYPE_RESET) {
             esp_zb_nvram_erase_at_start(true);                                          // erase previous network information.

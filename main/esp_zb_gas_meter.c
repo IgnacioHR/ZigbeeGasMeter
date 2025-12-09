@@ -34,13 +34,12 @@
 /* Hardware configuration */
 
 // input - pin with gas magnetic sensor contact
-#define PULSE_PIN GPIO_NUM_2
+#define PULSE_PIN GPIO_NUM_1
 
 // input - pin for the main button
-#define MAIN_BTN GPIO_NUM_4
+#define MAIN_BTN GPIO_NUM_0
 
-// input - pin to measure battery voltage
-#define BAT_VLTG GPIO_NUM_0
+#define EXTERNAL_ANTENNA
 
 // amount of time to ignore a digital input pin interrupt repetition
 #define DEBOUNCE_TIMEOUT 20 /* milliseconds */
@@ -64,6 +63,9 @@ RTC_DATA_ATTR struct timeval last_pulse_time;
 // to detect a long press without having to wait until
 // the user releases the button
 bool started_from_deep_sleep = false;
+
+// true while leaving the network to prevent sending data to coordinator
+bool leaving_network = false;
 
 // sleep
 RTC_DATA_ATTR struct timeval sleep_enter_time;
@@ -98,6 +100,7 @@ esp_err_t gm_counter_load_nvs()
         {
             current_summation_delivered.low = saved_count & 0x00000000FFFFFFFF;
             current_summation_delivered.high = (saved_count & 0x0000FFFF00000000) >> 32;
+            current_summation_delivered_float = (float)saved_count;
             ESP_LOGI(TAG, "Counter loaded: low=%lu high=%u", current_summation_delivered.low, current_summation_delivered.high);
         }
         else
@@ -153,6 +156,10 @@ void gm_counter_set(const esp_zb_uint48_t *new_value)
 {
     current_summation_delivered.low = new_value->low;
     current_summation_delivered.high = new_value->high;
+    uint64_t current_summation_64 = current_summation_delivered.high;
+    current_summation_64 <<= 32;
+    current_summation_64 |= current_summation_delivered.low;
+    current_summation_delivered_float = (float)current_summation_64;
     xEventGroupSetBits(report_event_group_handle, CURRENT_SUMMATION_DELIVERED_REPORT);
     xTaskNotifyGive(save_counter_task_handle);
 }
@@ -306,6 +313,7 @@ void gm_counter_increment(const struct timeval *now, bool fromISR)
         return;
 
     current_summation_delivered.low += 1; // Adds up 1 cent of m³
+    current_summation_delivered_float += 1;
     if (current_summation_delivered.low == 0)
     {
         current_summation_delivered.high += 1;
@@ -331,6 +339,7 @@ void gm_counter_increment(const struct timeval *now, bool fromISR)
 // function called when the device leaves the zigee network
 void leave_callback(esp_zb_zdp_status_t zdo_status, void *args)
 {
+    leaving_network = false;
     ESP_LOGI(TAG, "Leave status 0x%x", zdo_status);
 }
 
@@ -345,7 +354,9 @@ void longpress_cb(TimerHandle_t xTimer)
         uint16_t short_address = esp_zb_get_short_address();
         if (short_address != 0xfffe)
         {
-            ESP_LOGD(TAG, "Leaving network");
+            ESP_LOGI(TAG, "Leaving network");
+            xEventGroupSetBits(main_event_group_handle, SHALL_STOP_DEEP_SLEEP);
+            leaving_network = true;
             esp_zb_zdo_mgmt_leave_req_param_t leave_request = {
                 .device_address = {},
                 .dst_nwk_addr = 0xFFFF,
@@ -353,6 +364,8 @@ void longpress_cb(TimerHandle_t xTimer)
                 .rejoin = 0};
             esp_zb_get_long_address(leave_request.device_address);
             esp_zb_zdo_device_leave_req(&leave_request, leave_callback, NULL);
+        } else {
+            ESP_LOGE(TAG, "Short address is 0xFFFE so not leaving network!");
         }
     }
 }
@@ -405,7 +418,7 @@ void btn_long_press_start_task(void *arg)
                 ESP_LOGE(TAG, "Can't reschedule deep sleep timer");
         }
         xEventGroupSetBits(report_event_group_handle,
-                           CURRENT_SUMMATION_DELIVERED_REPORT | BATTER_REPORT | STATUS_REPORT | EXTENDED_STATUS_REPORT);
+                           CURRENT_SUMMATION_DELIVERED_REPORT | BATTERY_REPORT | STATUS_REPORT | EXTENDED_STATUS_REPORT);
         xEventGroupSetBits(main_event_group_handle, SHALL_MEASURE_BATTERY);
             // reset device status
         device_status = 0x0;
@@ -416,7 +429,7 @@ void btn_long_press_start_task(void *arg)
         {
             before_longpress_time_msec -= 150; // measured time for the device to start
         }
-        ESP_LOGD(TAG, "Start long press timer for %dms", before_longpress_time_msec);
+        ESP_LOGI(TAG, "Start long press timer for %dms", before_longpress_time_msec);
         if (xTimerChangePeriod(long_press_timer, pdMS_TO_TICKS(before_longpress_time_msec), pdMS_TO_TICKS(100)) != pdPASS)
         {
             ESP_LOGE(TAG, "Can't set long press timer time to %dms", before_longpress_time_msec);
@@ -437,7 +450,7 @@ void btn_long_press_stop_task(void *arg)
         ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
         if (xTimerStop(long_press_timer, pdMS_TO_TICKS(100)) == pdPASS)
         {
-            ESP_LOGD(TAG, "Stop long press timer");
+            ESP_LOGI(TAG, "Stop long press timer");
         }
         else
         {
@@ -485,6 +498,22 @@ void gm_main_loop_task(void *arg)
             }
             if (((uxBits & SHALL_ENABLE_ZIGBEE) != 0) && zigbee_task_handle == NULL)
             {
+#ifdef EXTERNAL_ANTENNA
+                uint64_t antenna_switch_pin = 1ULL << GPIO_NUM_3;
+                uint64_t antenna_mode_pin = 1ULL << GPIO_NUM_14;
+                gpio_config_t anthena_conf = {
+                    .intr_type = GPIO_INTR_DISABLE,
+                    .mode = GPIO_MODE_OUTPUT,
+                    .pin_bit_mask = antenna_switch_pin | antenna_mode_pin,
+                    .pull_down_en = GPIO_PULLDOWN_DISABLE,
+                    .pull_up_en = GPIO_PULLUP_DISABLE
+                };
+                ESP_ERROR_CHECK(gpio_config(&anthena_conf));
+
+                ESP_ERROR_CHECK(gpio_set_level(GPIO_NUM_3, 0));
+                vTaskDelay(pdMS_TO_TICKS(100));
+                ESP_ERROR_CHECK(gpio_set_level(GPIO_NUM_14, 1));
+#endif
                 /* Start Zigbee stack task */
                 TickType_t deep_sleep_time = pdMS_TO_TICKS(TIME_TO_SLEEP_ZIGBEE_ON);
                 if (xQueueSendToFront(deep_sleep_queue_handle, &deep_sleep_time, pdMS_TO_TICKS(100)) != pdTRUE)
@@ -642,7 +671,7 @@ esp_err_t gm_deep_sleep_init()
 
     ESP_ERROR_CHECK(esp_sleep_enable_ext1_wakeup_io(
         gpio_pulse_pin_mask | gpio_mainbtn_pin_mask, ESP_EXT1_WAKEUP_ANY_HIGH));
-
+    
     esp_deep_sleep_disable_rom_logging();
 
     return ESP_OK;
