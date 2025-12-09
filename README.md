@@ -57,6 +57,7 @@ I can't finish the device software in a reliable manner. Here is the list of thi
 	- There are hooks in the `esp_zb_app_signal_handler` function that ARE NEVER CALLED, no error, no debug information, no nothing useful to move forward from this point.
 	- The `leave_callback` function is also never called
 4 - Reporting is no longer working and no values are received in the coordinator since I added the analog input cluster. No errors are reported so this is difficult to debug.
+5 - When the main button is pressed and released 4 or 5 times, the device resets. Also don't know why and it is hard to debug
 
 So, if you have some experience with ESP32 and Zigbee devices or you just want this project to move forward. PLEASE CONTACT ME and help me debug all what is happening!
 
