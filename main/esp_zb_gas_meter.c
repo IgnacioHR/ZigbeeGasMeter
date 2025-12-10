@@ -212,18 +212,15 @@ void check_shall_enable_radio()
 // Computes if it is needed to measure battery voltage
 void check_shall_measure_battery()
 {
-    if (adc_task_handle == NULL)
+    bool measure_battery =
+        (last_battery_measurement_time.tv_sec == 0 && last_battery_measurement_time.tv_usec == 0) ||
+        (time_diff_ms(&last_battery_measurement_time) / 1000 >= MUST_SYNC_MINIMUM_TIME);
+    if (measure_battery)
     {
-        bool measure_battery =
-            (last_battery_measurement_time.tv_sec == 0 && last_battery_measurement_time.tv_usec == 0) ||
-            (time_diff_ms(&last_battery_measurement_time) / 1000 >= MUST_SYNC_MINIMUM_TIME);
-        if (measure_battery)
-        {
-            // battery voltage is measured with zigbee radio
-            // turned on
-            xEventGroupSetBits(main_event_group_handle, SHALL_MEASURE_BATTERY);
-            xEventGroupSetBits(report_event_group_handle, CURRENT_SUMMATION_DELIVERED_REPORT);
-        }
+        // battery voltage is measured with zigbee radio
+        // turned on
+        xEventGroupSetBits(main_event_group_handle, SHALL_MEASURE_BATTERY);
+        xEventGroupSetBits(report_event_group_handle, CURRENT_SUMMATION_DELIVERED_REPORT);
     }
 }
 
@@ -407,23 +404,18 @@ void deep_sleep_controller_task(void *arg)
 // task to start long press detector
 void btn_long_press_start_task(void *arg)
 {
+    ESP_LOGI(TAG, "Long press start task enter");
     while (true)
     {
         ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+        ESP_LOGI(TAG, "Device main button pressed");
         xEventGroupSetBits(main_event_group_handle, SHALL_ENABLE_ZIGBEE);
         if (deep_sleep_task_handle != NULL)
         {
             TickType_t deep_sleep_time = pdMS_TO_TICKS(TIME_TO_SLEEP_ZIGBEE_ON);
             if (xQueueSendToFront(deep_sleep_queue_handle, &deep_sleep_time, pdMS_TO_TICKS(100)) != pdTRUE)
                 ESP_LOGE(TAG, "Can't reschedule deep sleep timer");
-        }
-        xEventGroupSetBits(report_event_group_handle,
-                           CURRENT_SUMMATION_DELIVERED_REPORT | BATTERY_REPORT | STATUS_REPORT | EXTENDED_STATUS_REPORT);
-        xEventGroupSetBits(main_event_group_handle, SHALL_MEASURE_BATTERY);
-            // reset device status
-        device_status = 0x0;
-        device_extended_status = 0x0;
-        
+        }        
         int before_longpress_time_msec = LONG_PRESS_TIMEOUT * 1000;
         if (started_from_deep_sleep)
         {
@@ -445,9 +437,18 @@ void btn_long_press_start_task(void *arg)
 // task to stop long press detector
 void btn_long_press_stop_task(void *arg)
 {
+    ESP_LOGI(TAG, "Long press stop task enter");
     while (true)
     {
         ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+        ESP_LOGI(TAG, "Device main button released");
+        xEventGroupSetBits(report_event_group_handle,
+            CURRENT_SUMMATION_DELIVERED_REPORT | BATTERY_REPORT | STATUS_REPORT | EXTENDED_STATUS_REPORT);
+        xEventGroupSetBits(main_event_group_handle, SHALL_MEASURE_BATTERY);
+        // reset device status
+        device_status = 0x0;
+        device_extended_status = 0x0;
+        
         if (xTimerStop(long_press_timer, pdMS_TO_TICKS(100)) == pdPASS)
         {
             ESP_LOGI(TAG, "Stop long press timer");
@@ -490,11 +491,10 @@ void gm_main_loop_task(void *arg)
             pdMS_TO_TICKS(250));
         if (uxBits != 0)
         {
-            if (((uxBits & SHALL_MEASURE_BATTERY) != 0) && adc_task_handle == NULL)
+            if ((uxBits & SHALL_MEASURE_BATTERY) != 0)
             {
-                if (xTaskCreate(adc_task, "adc", 4096, NULL, 10, &adc_task_handle) != pdTRUE)
-                    ESP_LOGE(TAG, "Can't create adc task to measure battery");
                 ESP_LOGI(TAG, "Measuring battery capacity");
+                xTaskNotifyGiveIndexed(adc_task_handle, 0);
             }
             if (((uxBits & SHALL_ENABLE_ZIGBEE) != 0) && zigbee_task_handle == NULL)
             {
@@ -885,6 +885,7 @@ void app_main(void)
     ESP_ERROR_CHECK(xTaskCreate(save_counter_task, "save_counter", 2048, NULL, 15, &save_counter_task_handle) != pdPASS);
     ESP_ERROR_CHECK(xTaskCreate(btn_long_press_start_task, "long_press_start", 2048, NULL, 5, &btn_start_task_handle) != pdPASS);
     ESP_ERROR_CHECK(xTaskCreate(btn_long_press_stop_task, "long_press_stop", 2048, NULL, 5, &btn_stop_task_handle) != pdPASS);
+    ESP_ERROR_CHECK(xTaskCreate(adc_task, "adc", 4096, NULL, 10, &adc_task_handle) != pdPASS);
     ESP_ERROR_CHECK((reset_instantaneous_demand_timer = xTimerCreate("reset_inst_dema", pdMS_TO_TICKS(TIME_TO_RESET_INSTANTANEOUS_D), pdFALSE, "r_i_d", reset_instantaneous_demand_cb)) == NULL ? ESP_FAIL : ESP_OK);
 
     if (reset_error != ESP_OK) {

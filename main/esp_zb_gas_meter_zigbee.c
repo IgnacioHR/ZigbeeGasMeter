@@ -86,6 +86,8 @@ esp_zb_uint24_t divisor = {
 uint8_t alarm_mask = 0x03;
 uint8_t generic_device_type = 0xFF;
 
+TaskHandle_t zigbee_device_task_handle = NULL;
+
 // response to the ESP_ZB_CORE_REPORT_ATTR_CB_ID callback
 esp_err_t zb_attribute_reporting_handler(const esp_zb_zcl_report_attr_message_t *message)
 {
@@ -905,9 +907,12 @@ void gm_main_loop_zigbee_task(void *arg)
 // tasks definitions to satisfy reporting requirements
 esp_err_t gm_tasks_init()
 {
-    return (
-        xTaskCreate(gm_main_loop_zigbee_task, "sensor_quick_update", 4096, NULL, tskIDLE_PRIORITY, NULL) == pdPASS
-    ) ? ESP_OK : ESP_FAIL;
+    if (zigbee_device_task_handle == NULL) {
+        return (
+            xTaskCreate(gm_main_loop_zigbee_task, "sensor_quick_update", 4096, NULL, tskIDLE_PRIORITY, &zigbee_device_task_handle) == pdPASS
+        ) ? ESP_OK : ESP_FAIL;
+    }
+    return ESP_OK;
 }
 
 // Signal handler for zigbee radio
@@ -918,8 +923,11 @@ void esp_zb_app_signal_handler(esp_zb_app_signal_t *signal_struct)
     esp_zb_app_signal_type_t sig_type = *p_sg_p;
     ESP_LOGV(TAG, "Shall handle signal 0x%x - %s", sig_type, esp_zb_zdo_signal_to_string(sig_type));
     switch (sig_type) {
+    case ESP_ZB_ZDO_SIGNAL_DEFAULT_START:
+        ESP_LOGI(TAG, "ZDO DEFAULT START - status: %s", esp_err_to_name(err_status));
+        break;
     case ESP_ZB_ZDO_SIGNAL_SKIP_STARTUP:
-        ESP_LOGI(TAG, "Initialize Zigbee stack");
+        ESP_LOGI(TAG, "Zigbee stack initialized ... starting commissioning");
         esp_zb_bdb_start_top_level_commissioning(ESP_ZB_BDB_MODE_INITIALIZATION);
         break;
     case ESP_ZB_BDB_SIGNAL_DEVICE_FIRST_START:
@@ -962,6 +970,7 @@ void esp_zb_app_signal_handler(esp_zb_app_signal_t *signal_struct)
             esp_zb_nvram_erase_at_start(true);                                          // erase previous network information.
             esp_zb_bdb_start_top_level_commissioning(ESP_ZB_BDB_MODE_NETWORK_STEERING); // steering a new network.
         }
+        // leaving_network = false; // not needed as it is handled in the callback function
         break;
     case ESP_ZB_ZDO_SIGNAL_PRODUCTION_CONFIG_READY:
         esp_zb_set_node_descriptor_manufacturer_code(manufacturer_code);

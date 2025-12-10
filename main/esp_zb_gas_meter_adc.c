@@ -73,7 +73,7 @@ bool IRAM_ATTR bat_conv_done_cb(adc_continuous_handle_t handle, const adc_contin
 {
     BaseType_t mustYield = pdFALSE;
     //Notify that ADC continuous driver has done enough number of conversions
-    vTaskNotifyGiveFromISR(adc_task_handle, &mustYield);
+    vTaskGenericNotifyGiveFromISR(adc_task_handle, 1, &mustYield);
 
     return (mustYield == pdTRUE);
 }
@@ -110,83 +110,85 @@ void bat_continuous_adc_init(const adc_channel_t channel, adc_continuous_handle_
 // The task is deleted when the process finish
 void adc_task(void *arg)
 {
-    ESP_LOGD(TAG, "ADC Task Init...");
-    adc_cali_handle_t adc1_cali_chan0_handle = NULL;
+    ESP_LOGI(TAG, "ADC Task Init...");
+    while (true) {
+        ulTaskGenericNotifyTake(0, pdTRUE, portMAX_DELAY);
+        ESP_LOGI(TAG, "Starting battery measures");
+        adc_cali_handle_t adc1_cali_chan0_handle = NULL;
 
-    gpio_set_level(BAT_MON_ENABLE, 1);
-    vTaskDelay(pdMS_TO_TICKS(5000));
-    bat_continuous_adc_init(channel, &handle);
-    adc_continuous_evt_cbs_t cbs = {
-        .on_conv_done = bat_conv_done_cb,
-    };
-    ESP_ERROR_CHECK(adc_continuous_register_event_callbacks(handle, &cbs, NULL));
-    ESP_ERROR_CHECK(adc_continuous_start(handle));
-    ESP_ERROR_CHECK(bat_adc_calibration_init(ADC_UNIT_1, channel, ADC_ATTEN_DB_12, &adc1_cali_chan0_handle));
+        gpio_set_level(BAT_MON_ENABLE, 1);
+        vTaskDelay(pdMS_TO_TICKS(5000));
+        bat_continuous_adc_init(channel, &handle);
+        adc_continuous_evt_cbs_t cbs = {
+            .on_conv_done = bat_conv_done_cb,
+        };
+        ESP_ERROR_CHECK(adc_continuous_register_event_callbacks(handle, &cbs, NULL));
+        ESP_ERROR_CHECK(adc_continuous_start(handle));
+        ESP_ERROR_CHECK(bat_adc_calibration_init(ADC_UNIT_1, channel, ADC_ATTEN_DB_12, &adc1_cali_chan0_handle));
 
-    uint8_t result[BAT_BUFFER_READ_LEN] = {0};
-    memset(result, 0xcc, BAT_BUFFER_READ_LEN);
+        uint8_t result[BAT_BUFFER_READ_LEN] = {0};
+        memset(result, 0xcc, BAT_BUFFER_READ_LEN);
 
-    ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
-    gpio_set_level(BAT_MON_ENABLE, 0);
+        ulTaskGenericNotifyTake(1, pdTRUE, portMAX_DELAY);
+        gpio_set_level(BAT_MON_ENABLE, 0);
 
-    uint32_t ret_num = 0;
-    esp_err_t ret = adc_continuous_read(handle, result, BAT_BUFFER_READ_LEN, &ret_num, 0);
-    if (ret == ESP_OK) {
-        uint64_t total = 0;
-        int16_t values = 0;
-        for (int i = 0; i < ret_num; i += SOC_ADC_DIGI_RESULT_BYTES) {
-            adc_digi_output_data_t *p = (adc_digi_output_data_t*)&result[i];
-            uint32_t chan_num = p->type2.channel;
-            /* Check the channel number validation, the data is invalid if the channel num exceed the maximum channel */
-            if (chan_num < SOC_ADC_CHANNEL_NUM(ADC_UNIT_1)) {
-                uint32_t data = p->type2.data;
-                total += data;
-                values++;
+        uint32_t ret_num = 0;
+        esp_err_t ret = adc_continuous_read(handle, result, BAT_BUFFER_READ_LEN, &ret_num, 0);
+        if (ret == ESP_OK) {
+            uint64_t total = 0;
+            int16_t values = 0;
+            for (int i = 0; i < ret_num; i += SOC_ADC_DIGI_RESULT_BYTES) {
+                adc_digi_output_data_t *p = (adc_digi_output_data_t*)&result[i];
+                uint32_t chan_num = p->type2.channel;
+                /* Check the channel number validation, the data is invalid if the channel num exceed the maximum channel */
+                if (chan_num < SOC_ADC_CHANNEL_NUM(ADC_UNIT_1)) {
+                    uint32_t data = p->type2.data;
+                    total += data;
+                    values++;
+                }
             }
+            if (values > 0) {
+                uint32_t average = total / values;
+                int voltage;
+                ESP_ERROR_CHECK(adc_cali_raw_to_voltage(adc1_cali_chan0_handle, average, &voltage));
+                // convert to 2s lipo ranges and mult by 10
+                float bat_voltage = ((float)(3.6084)*voltage + (float)0.062)/(float)(100.0); 
+                battery_voltage = (uint8_t)(bat_voltage+(float)0.5);
+                battery_percentage = (uint8_t)((bat_voltage-(float)(70.0))*(float)(13.6433)) + 7;
+                if (battery_percentage > 200)
+                    battery_percentage = 200;
+                xEventGroupSetBits(report_event_group_handle, BATTERY_REPORT);
+
+                if (battery_voltage < battery_voltage_th1) {
+                    battery_alarm_state |= (1 << 1); // BatteryVoltageThreshold1 or BatteryPercentageThreshold1 reached for Battery Source 1
+                } else {
+                    battery_alarm_state &= ~(1 << 1);
+                }
+                if (battery_voltage < battery_voltage_min) {
+                    battery_alarm_state |= (1 << 0); // BatteryVoltageMinThreshold or BatteryPercentageMinThreshold reached for Battery Source 1
+                } else {
+                    battery_alarm_state &= ~(1 << 0);
+                }
+                if (battery_alarm_state != 0 && (device_status & ESP_ZB_ZCL_METERING_GAS_LOW_BATTERY) == 0) {
+                    device_status |= ESP_ZB_ZCL_METERING_GAS_LOW_BATTERY;
+                    xEventGroupSetBits(report_event_group_handle, STATUS_REPORT);
+                } else if (battery_alarm_state == 0 && (device_status & ESP_ZB_ZCL_METERING_GAS_LOW_BATTERY) != 0) {
+                    device_status &= ~ESP_ZB_ZCL_METERING_GAS_LOW_BATTERY;
+                    xEventGroupSetBits(report_event_group_handle, STATUS_REPORT);
+                }
+
+                ESP_LOGI(TAG, "Raw: %"PRIu32" Calibrated: %"PRId16"mV Bat Voltage: %1.2fv ZB Voltage: %d ZB Percentage: %d Alarm 0x%lx", 
+                    average, voltage, bat_voltage/(float)(10.0), battery_voltage, battery_percentage, battery_alarm_state);
+                gettimeofday(&last_battery_measurement_time, NULL);
+            }
+        } else if (ret == ESP_ERR_TIMEOUT) {
+            ESP_LOGE(TAG, "ADC Task ESP_ERR_TIMEOUT");
+            //We try to read `EXAMPLE_READ_LEN` until API returns timeout, which means there's no available data
+            // TODO: indicate in status that battery can't be read
         }
-        if (values > 0) {
-            uint32_t average = total / values;
-            int voltage;
-            ESP_ERROR_CHECK(adc_cali_raw_to_voltage(adc1_cali_chan0_handle, average, &voltage));
-            // convert to 2s lipo ranges and mult by 10
-            float bat_voltage = ((float)(3.6084)*voltage + (float)0.062)/(float)(100.0); 
-            battery_voltage = (uint8_t)(bat_voltage+(float)0.5);
-            battery_percentage = (uint8_t)((bat_voltage-(float)(70.0))*(float)(13.6433)) + 7;
-            if (battery_percentage > 200)
-                battery_percentage = 200;
-            xEventGroupSetBits(report_event_group_handle, BATTERY_REPORT);
-
-            if (battery_voltage < battery_voltage_th1) {
-                battery_alarm_state |= (1 << 1); // BatteryVoltageThreshold1 or BatteryPercentageThreshold1 reached for Battery Source 1
-            } else {
-                battery_alarm_state &= ~(1 << 1);
-            }
-            if (battery_voltage < battery_voltage_min) {
-                battery_alarm_state |= (1 << 0); // BatteryVoltageMinThreshold or BatteryPercentageMinThreshold reached for Battery Source 1
-            } else {
-                battery_alarm_state &= ~(1 << 0);
-            }
-            if (battery_alarm_state != 0 && (device_status & ESP_ZB_ZCL_METERING_GAS_LOW_BATTERY) == 0) {
-                device_status |= ESP_ZB_ZCL_METERING_GAS_LOW_BATTERY;
-                xEventGroupSetBits(report_event_group_handle, STATUS_REPORT);
-            } else if (battery_alarm_state == 0 && (device_status & ESP_ZB_ZCL_METERING_GAS_LOW_BATTERY) != 0) {
-                device_status &= ~ESP_ZB_ZCL_METERING_GAS_LOW_BATTERY;
-                xEventGroupSetBits(report_event_group_handle, STATUS_REPORT);
-            }
-
-            ESP_LOGI(TAG, "Raw: %"PRIu32" Calibrated: %"PRId16"mV Bat Voltage: %1.2fv ZB Voltage: %d ZB Percentage: %d Alarm 0x%lx", 
-                average, voltage, bat_voltage/(float)(10.0), battery_voltage, battery_percentage, battery_alarm_state);
-            gettimeofday(&last_battery_measurement_time, NULL);
-        }
-    } else if (ret == ESP_ERR_TIMEOUT) {
-        ESP_LOGE(TAG, "ADC Task ESP_ERR_TIMEOUT");
-        //We try to read `EXAMPLE_READ_LEN` until API returns timeout, which means there's no available data
-        // TODO: indicate in status that battery can't be read
+        ESP_ERROR_CHECK(bat_adc_calibration_deinit(adc1_cali_chan0_handle));
+        ESP_ERROR_CHECK(adc_continuous_stop(handle));
+        ESP_ERROR_CHECK(adc_continuous_deinit(handle));
+        ESP_LOGI(TAG, "Finishing battery measures");
     }
-
-    ESP_ERROR_CHECK(bat_adc_calibration_deinit(adc1_cali_chan0_handle));
-    ESP_ERROR_CHECK(adc_continuous_stop(handle));
-    ESP_ERROR_CHECK(adc_continuous_deinit(handle));
-    adc_task_handle = NULL;
-    vTaskDelete(NULL);
 }
