@@ -10,7 +10,7 @@
  * as you credit the original author(s) and share any derivatives under the same license.
  */
 #include "esp_err.h"
-#include "zcl/esp_zigbee_zcl_command.h"
+#include "esp_zigbee_core.h"
 #include "esp_zb_gas_version.h"
 
 #define OTA_UPGRADE_MAX_DATA_SIZE       223
