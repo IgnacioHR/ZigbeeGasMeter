@@ -77,14 +77,36 @@ TaskHandle_t adc_task_handle = NULL;
 TaskHandle_t zigbee_task_handle = NULL;
 TaskHandle_t deep_sleep_task_handle = NULL;
 TaskHandle_t save_counter_task_handle = NULL;
-TaskHandle_t btn_start_task_handle = NULL;
-TaskHandle_t btn_stop_task_handle = NULL;
+TaskHandle_t btn_press_task_handle = NULL;
+TaskHandle_t btn_release_task_handle = NULL;
 QueueHandle_t deep_sleep_queue_handle = NULL;
 TimerHandle_t reset_instantaneous_demand_timer = NULL;
-TimerHandle_t long_press_timer = NULL;
 TimerHandle_t deep_sleep_timer = NULL;
 EventGroupHandle_t report_event_group_handle = NULL;
 EventGroupHandle_t main_event_group_handle = NULL;
+
+// Intelligent button gesture detection timers
+TimerHandle_t t0_2s_since_press = NULL;
+TimerHandle_t t4s_since_press = NULL;
+TimerHandle_t t0_2s_since_release = NULL;
+TimerHandle_t t0_5s_since_release = NULL;
+TimerHandle_t t5s_since_release = NULL;
+
+TaskHandle_t btn_task_handle = NULL;
+
+#define CLICK_PRESS_TIME_MS      200    // MUST BE BIGGER THAN 150
+#define CLICK_HOLD_TIME_MS       4000
+#define CLICK_RELEASE_TIME_MS    200
+#define BUTTON_EVENT_DELAY_MS    500
+#define BUTTON_RESET_STATE_MS    5000
+
+bool is_none = true;
+bool is_press = false;
+bool is_release = false;
+bool is_single_click = false;
+bool is_double_click = false;
+bool is_unknown_click = false;
+bool is_hold = false;
 
 static portMUX_TYPE counter_spinlock = portMUX_INITIALIZER_UNLOCKED;
 
@@ -340,33 +362,6 @@ void leave_callback(esp_zb_zdp_status_t zdo_status, void *args)
     ESP_LOGI(TAG, "Leave status 0x%x", zdo_status);
 }
 
-// long press detected
-void longpress_cb(TimerHandle_t xTimer)
-{
-    // make sure the button is still pressed
-    int level = gpio_get_level(MAIN_BTN);
-    if (level == 1)
-    {
-        ESP_LOGI(TAG, "Button long press detected");
-        uint16_t short_address = esp_zb_get_short_address();
-        if (short_address != 0xfffe)
-        {
-            ESP_LOGI(TAG, "Leaving network");
-            xEventGroupSetBits(main_event_group_handle, SHALL_STOP_DEEP_SLEEP);
-            leaving_network = true;
-            esp_zb_zdo_mgmt_leave_req_param_t leave_request = {
-                .device_address = {},
-                .dst_nwk_addr = 0xFFFF,
-                .remove_children = 0,
-                .rejoin = 0};
-            esp_zb_get_long_address(leave_request.device_address);
-            esp_zb_zdo_device_leave_req(&leave_request, leave_callback, NULL);
-        } else {
-            ESP_LOGE(TAG, "Short address is 0xFFFE so not leaving network!");
-        }
-    }
-}
-
 // Compute how long to wait for sleep depending on device conditions
 TickType_t dm_deep_sleep_time_ms()
 {
@@ -401,62 +396,132 @@ void deep_sleep_controller_task(void *arg)
     }
 }
 
-// task to start long press detector
-void btn_long_press_start_task(void *arg)
+// task to manage main button press events
+void btn_press_task(void *arg)
 {
-    ESP_LOGI(TAG, "Long press start task enter");
+    ESP_LOGI(TAG, "Main button press task enter");
     while (true)
     {
         ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
-        ESP_LOGI(TAG, "Device main button pressed");
+        ESP_LOGI(TAG, "Main button device pressed");
+        if (is_none) {
+            is_none = false;
+            is_press = true;
+            xTaskNotifyGive(btn_task_handle);
+        }
         xEventGroupSetBits(main_event_group_handle, SHALL_ENABLE_ZIGBEE);
         if (deep_sleep_task_handle != NULL)
         {
             TickType_t deep_sleep_time = pdMS_TO_TICKS(TIME_TO_SLEEP_ZIGBEE_ON);
             if (xQueueSendToFront(deep_sleep_queue_handle, &deep_sleep_time, pdMS_TO_TICKS(100)) != pdTRUE)
                 ESP_LOGE(TAG, "Can't reschedule deep sleep timer");
-        }        
-        int before_longpress_time_msec = LONG_PRESS_TIMEOUT * 1000;
+        }
+        bool is2thtimerDormant = xTimerIsTimerActive(t0_2s_since_release) == pdFALSE;
+        if (xTimerIsTimerActive(t0_5s_since_release) != pdFALSE) {
+            xTimerStop(t0_5s_since_release, pdMS_TO_TICKS(100));
+        }
+        if (xTimerIsTimerActive(t5s_since_release) != pdFALSE) {
+            xTimerStop(t5s_since_release, pdMS_TO_TICKS(100));
+        }
+        int click_press_time_adjusted_msec = CLICK_PRESS_TIME_MS;
+        int hold_time_adjusted_msec = CLICK_HOLD_TIME_MS;
         if (started_from_deep_sleep)
         {
-            before_longpress_time_msec -= 150; // measured time for the device to start
+            click_press_time_adjusted_msec -= 150; // measured time for the device to start
+            hold_time_adjusted_msec -= 150;
         }
-        ESP_LOGI(TAG, "Start long press timer for %dms", before_longpress_time_msec);
-        if (xTimerChangePeriod(long_press_timer, pdMS_TO_TICKS(before_longpress_time_msec), pdMS_TO_TICKS(100)) != pdPASS)
+        ESP_LOGI(TAG, "Start long press timer for %dms", click_press_time_adjusted_msec);
+        if (xTimerChangePeriod(t0_2s_since_press, pdMS_TO_TICKS(click_press_time_adjusted_msec), pdMS_TO_TICKS(100)) != pdPASS)
         {
-            ESP_LOGE(TAG, "Can't set long press timer time to %dms", before_longpress_time_msec);
+            ESP_LOGE(TAG, "Can't set press timer time to %dms", click_press_time_adjusted_msec);
             return;
         };
-        if (xTimerStart(long_press_timer, pdMS_TO_TICKS(100)) != pdPASS)
+        if (xTimerStart(t0_2s_since_press, pdMS_TO_TICKS(100)) != pdPASS)
         {
-            ESP_LOGE(TAG, "Can't start long press timer");
+            ESP_LOGE(TAG, "Can't start press timer");
+        }
+        if (is2thtimerDormant) {
+            ESP_LOGI(TAG, "Start hold timer for %dms", hold_time_adjusted_msec);
+            if (xTimerChangePeriod(t4s_since_press, pdMS_TO_TICKS(hold_time_adjusted_msec), pdMS_TO_TICKS(100)) != pdPASS)
+            {
+                ESP_LOGE(TAG, "Can't set hold timer time to %dms", hold_time_adjusted_msec);
+                return;
+            };
+            if (xTimerStart(t4s_since_press, pdMS_TO_TICKS(100)) != pdPASS)
+            {
+                ESP_LOGE(TAG, "Can't start hold timer");
+            }
         }
     }
 }
 
-// task to stop long press detector
-void btn_long_press_stop_task(void *arg)
+void btn_release_task(void *arg)
 {
-    ESP_LOGI(TAG, "Long press stop task enter");
+    ESP_LOGI(TAG, "Main button release task enter");
     while (true)
     {
         ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
-        ESP_LOGI(TAG, "Device main button released");
-        xEventGroupSetBits(report_event_group_handle,
-            CURRENT_SUMMATION_DELIVERED_REPORT | BATTERY_REPORT | STATUS_REPORT | EXTENDED_STATUS_REPORT);
-        xEventGroupSetBits(main_event_group_handle, SHALL_MEASURE_BATTERY);
-        // reset device status
-        device_status = 0x0;
-        device_extended_status = 0x0;
-        
-        if (xTimerStop(long_press_timer, pdMS_TO_TICKS(100)) == pdPASS)
-        {
-            ESP_LOGI(TAG, "Stop long press timer");
+        ESP_LOGI(TAG, "Main button device released");
+        if (is_press) {
+            is_press = false;
+            is_release = true;
+            xTaskNotifyGive(btn_task_handle);
         }
-        else
+        bool over_two_tenth_of_s_since_press = xTimerIsTimerActive(t0_2s_since_press) == pdFALSE;
+        bool in_two_tenth_of_s_since_press = !over_two_tenth_of_s_since_press;
+        if (is_single_click && in_two_tenth_of_s_since_press) {
+            is_single_click = false;
+            is_double_click = true;
+        }
+        if (!is_double_click && in_two_tenth_of_s_since_press) {
+            xTimerStop(t0_2s_since_press, pdMS_TO_TICKS(100));
+            is_single_click = true;
+        }
+        if (xTimerIsTimerActive(t4s_since_press) != pdFALSE) {
+            xTimerStop(t4s_since_press, pdMS_TO_TICKS(100));
+        }
+        if (xTimerStart(t0_2s_since_release, pdMS_TO_TICKS(100)) != pdPASS)
         {
-            ESP_LOGE(TAG, "Error stoping long press timer");
-        };    
+            ESP_LOGE(TAG, "Can't start 0.2s timer after release");
+        }
+        if (xTimerStart(t0_5s_since_release, pdMS_TO_TICKS(100)) != pdPASS)
+        {
+            ESP_LOGE(TAG, "Can't start 0.5s timer after release");
+        }
+        if (xTimerStart(t5s_since_release, pdMS_TO_TICKS(100)) != pdPASS)
+        {
+            ESP_LOGE(TAG, "Can't start 5s timer after release");
+        }
+    }
+}
+
+void btn_task(void *arg)
+{
+    ESP_LOGI(TAG, "Main button action task");
+    while (true)
+    {
+        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+        if (is_press)  {
+            ESP_LOGI(TAG, "Button press");
+        } else if (is_release)  {
+            ESP_LOGI(TAG, "Button release");
+        } else if (is_single_click) {
+            ESP_LOGI(TAG, "Single click detected");
+            is_single_click = false;
+        } else if (is_double_click) {
+            ESP_LOGI(TAG, "Double click detected");
+            is_double_click = false;
+        } else if (is_unknown_click) {
+            ESP_LOGI(TAG, "Unknown click detected");
+            is_unknown_click = false;
+        } else if (is_hold) {
+            ESP_LOGI(TAG, "Hold detected");
+            is_unknown_click = false;
+        } else if (is_none) {
+            ESP_LOGI(TAG, "Button state reset");
+        } else {
+            ESP_LOGI(TAG, "Unknown button state");
+        }
     }
 }
 
@@ -578,6 +643,45 @@ void enter_deep_sleep_cb(TimerHandle_t xTimer)
     esp_deep_sleep_start();
 }
 
+void t0_2s_since_press_cb(TimerHandle_t xTimer)
+{
+    if (is_single_click) {
+        is_single_click = false;
+        is_unknown_click = true;
+    }
+    if (is_double_click) {
+        is_double_click = false;
+        is_unknown_click = true;
+    }
+}
+
+void t4s_since_press_cb(TimerHandle_t xTimer)
+{
+    is_hold = true;
+    xTaskNotifyGive(btn_task_handle);
+}
+
+void t0_2s_since_release_cb(TimerHandle_t xTimer)
+{
+}
+
+void t0_5s_since_release_cb(TimerHandle_t xTimer)
+{
+    is_press = false;
+    is_release = false;
+    xTaskNotifyGive(btn_task_handle);
+}
+
+void t20s_since_release_cb(TimerHandle_t xTimer)
+{
+    // reset to default clean state (none)
+    is_none = true;
+    is_single_click = false;
+    is_double_click = false;
+    is_unknown_click = false;
+    xTaskNotifyGive(btn_task_handle);
+}
+
 // configure deep sleep for the gas meter
 esp_err_t gm_deep_sleep_init()
 {
@@ -615,11 +719,11 @@ esp_err_t gm_deep_sleep_init()
             int level = gpio_get_level(MAIN_BTN);
             if (level == 0)
             {
-                xTaskNotifyGive(btn_stop_task_handle);
+                xTaskNotifyGive(btn_release_task_handle);
             }
             else
             {
-                xTaskNotifyGive(btn_start_task_handle);
+                xTaskNotifyGive(btn_press_task_handle);
             }
             resolved = true;
         }
@@ -726,11 +830,11 @@ void IRAM_ATTR gpio_btn_isr_handler(void *arg)
     if (level == 1)
     {
         started_from_deep_sleep = false;
-        vTaskNotifyGiveFromISR(btn_start_task_handle, &mustYield);
+        vTaskNotifyGiveFromISR(btn_press_task_handle, &mustYield);
     }
     if (level == 0)
     {
-        vTaskNotifyGiveFromISR(btn_stop_task_handle, &mustYield);
+        vTaskNotifyGiveFromISR(btn_release_task_handle, &mustYield);
     }
 
     last_main_btn_time = current_time;
@@ -878,13 +982,22 @@ void app_main(void)
     esp_err_t reset_error = report_reset_reason();
 
     ESP_ERROR_CHECK((deep_sleep_timer = xTimerCreate("deep_sleep_timer", portMAX_DELAY, pdFALSE, "d_s_t", enter_deep_sleep_cb)) == NULL ? ESP_FAIL : ESP_OK);
-    ESP_ERROR_CHECK((long_press_timer = xTimerCreate("long_press_timer", portMAX_DELAY, pdFALSE, "l_p_t", longpress_cb)) == NULL ? ESP_FAIL : ESP_OK);
+    // ESP_ERROR_CHECK((long_press_timer = xTimerCreate("long_press_timer", portMAX_DELAY, pdFALSE, "l_p_t", longpress_cb)) == NULL ? ESP_FAIL : ESP_OK);
+
+    // intelligent button timers
+    ESP_ERROR_CHECK((t0_2s_since_press = xTimerCreate("0.2s_since_press", pdMS_TO_TICKS(CLICK_PRESS_TIME_MS), pdFALSE, "2_t_p", t0_2s_since_press_cb)) == NULL ? ESP_FAIL : ESP_OK);
+    ESP_ERROR_CHECK((t4s_since_press = xTimerCreate("4s_since_press", pdMS_TO_TICKS(CLICK_HOLD_TIME_MS), pdFALSE, "4_s_p", t4s_since_press_cb)) == NULL ? ESP_FAIL : ESP_OK);
+    ESP_ERROR_CHECK((t0_2s_since_release = xTimerCreate("0.2s_since_release", pdMS_TO_TICKS(CLICK_RELEASE_TIME_MS), pdFALSE, "2_t_r", t0_2s_since_release_cb)) == NULL ? ESP_FAIL : ESP_OK);
+    ESP_ERROR_CHECK((t0_5s_since_release = xTimerCreate("0.5s_since_release", pdMS_TO_TICKS(BUTTON_EVENT_DELAY_MS), pdFALSE, "5_t_r", t0_5s_since_release_cb)) == NULL ? ESP_FAIL : ESP_OK);
+    ESP_ERROR_CHECK((t5s_since_release = xTimerCreate("5s_since_release", pdMS_TO_TICKS(BUTTON_RESET_STATE_MS), pdFALSE, "5_s_r", t20s_since_release_cb)) == NULL ? ESP_FAIL : ESP_OK);
+
     ESP_ERROR_CHECK((deep_sleep_queue_handle = xQueueCreate(1, sizeof(TickType_t))) == NULL ? ESP_FAIL : ESP_OK);
     ESP_ERROR_CHECK((main_event_group_handle = xEventGroupCreate()) == NULL ? ESP_FAIL : ESP_OK);
     ESP_ERROR_CHECK((report_event_group_handle = xEventGroupCreate()) == NULL ? ESP_FAIL : ESP_OK);
     ESP_ERROR_CHECK(xTaskCreate(save_counter_task, "save_counter", 2048, NULL, 15, &save_counter_task_handle) != pdPASS);
-    ESP_ERROR_CHECK(xTaskCreate(btn_long_press_start_task, "long_press_start", 2048, NULL, 5, &btn_start_task_handle) != pdPASS);
-    ESP_ERROR_CHECK(xTaskCreate(btn_long_press_stop_task, "long_press_stop", 2048, NULL, 5, &btn_stop_task_handle) != pdPASS);
+    ESP_ERROR_CHECK(xTaskCreate(btn_press_task, "btn_press", 2048, NULL, 5, &btn_press_task_handle) != pdPASS);
+    ESP_ERROR_CHECK(xTaskCreate(btn_release_task, "btn_release", 2048, NULL, 5, &btn_release_task_handle) != pdPASS);
+    ESP_ERROR_CHECK(xTaskCreate(btn_task, "btn_task", 2048, NULL, 5, &btn_task_handle) != pdPASS);
     ESP_ERROR_CHECK(xTaskCreate(adc_task, "adc", 4096, NULL, 10, &adc_task_handle) != pdPASS);
     ESP_ERROR_CHECK((reset_instantaneous_demand_timer = xTimerCreate("reset_inst_dema", pdMS_TO_TICKS(TIME_TO_RESET_INSTANTANEOUS_D), pdFALSE, "r_i_d", reset_instantaneous_demand_cb)) == NULL ? ESP_FAIL : ESP_OK);
 
