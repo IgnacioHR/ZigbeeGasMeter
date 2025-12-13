@@ -537,6 +537,12 @@ void btn_task(void *arg)
                 break;
             case RELEASE:
                 ESP_LOGI(TAG, "Button release");
+                xEventGroupSetBits(report_event_group_handle,
+                    CURRENT_SUMMATION_DELIVERED_REPORT | BATTERY_REPORT | STATUS_REPORT | EXTENDED_STATUS_REPORT);
+                xEventGroupSetBits(main_event_group_handle, SHALL_MEASURE_BATTERY);
+                // reset device status
+                device_status = 0x0;
+                device_extended_status = 0x0;
                 break;
             case SINGLE_CLICK:
                 ESP_LOGI(TAG, "Single click detected");
