@@ -420,13 +420,6 @@ void btn_press_task(void *arg)
             button_state = PRESS;
             xTaskNotify(btn_task_handle, button_state, eSetValueWithOverwrite);
         }
-        xEventGroupSetBits(main_event_group_handle, SHALL_ENABLE_ZIGBEE);
-        if (deep_sleep_task_handle != NULL)
-        {
-            TickType_t deep_sleep_time = pdMS_TO_TICKS(TIME_TO_SLEEP_ZIGBEE_ON);
-            if (xQueueSendToFront(deep_sleep_queue_handle, &deep_sleep_time, pdMS_TO_TICKS(100)) != pdTRUE)
-                ESP_LOGE(TAG, "Can't reschedule deep sleep timer");
-        }
         if (xTimerIsTimerActive(t0_5s_since_release) != pdFALSE) {
             xTimerStop(t0_5s_since_release, pdMS_TO_TICKS(100));
         }
@@ -514,6 +507,13 @@ void btn_task(void *arg)
         switch (state) {
             case PRESS:
                 ESP_LOGI(TAG, "Button press");
+                xEventGroupSetBits(main_event_group_handle, SHALL_ENABLE_ZIGBEE);
+                if (deep_sleep_task_handle != NULL)
+                {
+                    TickType_t deep_sleep_time = pdMS_TO_TICKS(TIME_TO_SLEEP_ZIGBEE_ON);
+                    if (xQueueSendToFront(deep_sleep_queue_handle, &deep_sleep_time, pdMS_TO_TICKS(100)) != pdTRUE)
+                        ESP_LOGE(TAG, "Can't reschedule deep sleep timer");
+                }
                 break;
             case RELEASE:
                 ESP_LOGI(TAG, "Button release");
