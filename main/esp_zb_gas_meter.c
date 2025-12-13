@@ -367,6 +367,26 @@ void gm_counter_increment(const struct timeval *now, bool fromISR)
         gm_compute_instantaneous_demand(time_diff_ms, fromISR);
 }
 
+void leave_action()
+{
+    uint16_t short_address = esp_zb_get_short_address();
+    if (short_address != 0xfffe)
+    {
+        ESP_LOGI(TAG, "Leaving network");
+        xEventGroupSetBits(main_event_group_handle, SHALL_STOP_DEEP_SLEEP);
+        leaving_network = true;
+        esp_zb_zdo_mgmt_leave_req_param_t leave_request = {
+            .device_address = {},
+            .dst_nwk_addr = 0xFFFF,
+            .remove_children = 0,
+            .rejoin = 0};
+        esp_zb_get_long_address(leave_request.device_address);
+        esp_zb_zdo_device_leave_req(&leave_request, leave_callback, NULL);
+    } else {
+        ESP_LOGE(TAG, "Short address is 0xFFFE so not leaving network!");
+    }
+}
+
 // function called when the device leaves the zigee network
 void leave_callback(esp_zb_zdp_status_t zdo_status, void *args)
 {
@@ -523,6 +543,7 @@ void btn_task(void *arg)
                 break;
             case DOUBLE_CLICK:
                 ESP_LOGI(TAG, "Double click detected");
+                leave_action();
                 break;
             case UNKNOWN_CLICK:
                 ESP_LOGI(TAG, "Unknown click detected");
