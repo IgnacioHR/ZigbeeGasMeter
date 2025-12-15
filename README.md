@@ -47,20 +47,12 @@ After searching for commercial Zigbee gas meters and finding none, I decided to 
 ## Project Status
 
 !!HELP NEEDED!! December 9th 2025
-I can't finish the device software in a reliable manner. Here is the list of things that still don't work properly.
+If you have some experience with ESP32 and Zigbee devices or you just want this project to move forward. PLEASE CONTACT ME and help me debug this device!
+
+December 15th 2025 - Most of the problems fixed. Remaining issues are:
 
 1 - Home assistant support for the smart meter devices that reports m³/h as a unit of power (when the fluid is GAS) is not supported. So I created another cluster for reporting the counter as an analog input cluster. Note this is a problem because the maximum count value of a float is 16777216 but I added this just for testing.
-2 - Since then, new counter values are not transmitted. In the logs they are OK, but the zigbee side is getting me crazy. Nothing works as it should be with the esp-idf framework. The documentation is really poor and hard to find in examples.
-3 Pressing the device button for 5 seconds DOES NOT LEAVE THE NETWORK! Don't know why.
-	- The button long press gesture is recognized.
-	- The device calls `esp_zb_zdo_device_leave_req(&leave_request, leave_callback, NULL);` as it should be as per the documentation
-	- There are hooks in the `esp_zb_app_signal_handler` function that ARE NEVER CALLED, no error, no debug information, no nothing useful to move forward from this point.
-	- The `leave_callback` function is also never called
-4 - Reporting is no longer working and no values are received in the coordinator since I added the analog input cluster. No errors are reported so this is difficult to debug.
-5 - When the main button is pressed and released 4 or 5 times, the device resets. Also don't know why and it is hard to debug
-6 - Exiting from deep sleep using the device button causes another unexpected device reset
-
-So, if you have some experience with ESP32 and Zigbee devices or you just want this project to move forward. PLEASE CONTACT ME and help me debug all what is happening!
+2 - Voltage value is not transmitted to the server as part of the value report (in zigbee terms) I actually I know i can force read the value from the server but I don't know how to push the value from the device to the server.
 
 This project is still in the development phase. While it is not yet deployed for real gas consumption measurement, I have a working prototype on an **ESP32-C6-WROOM-1 development board** in a test environment. The prototype uses two buttons: one simulating the gas meter pulses and the other functioning as the main device button. The software is fully operational, I'm actually working on the hardware side.
 
@@ -140,10 +132,18 @@ idf.py -p PORT flash
 idf.py -p PORT monitor
 ```
 
-## Advanced Configuration
+## Device operation and main button actions
 
-- Leave the network and join again: Long-press the device button for 5 seconds.
-- Set Counter Value: Send a Zigbee command to synchronize with your gas meter.
+The device has just one button, but multiple gestures are recognized
+
+- Button press: When the main button is pressed, if the device was is sleep mode, zigbee radio is enabled. Note, button press is the first gesture of a possible list of gestures recognized
+- Button release: No specific action is associated to this gesture
+- Single click: A single click is detected when the time between press and release is shorter than 250ms. When single click gesture is detected, the device shall refresh data on the server side, including the battery status and voltage value (note the voltage value is not refresh in the server side automatically, there is a note on this topic), device error conditions are reset and reevaluated again.
+- Double click: A double click is detected when the time between press and release is sorter then 250ms and the button cycle is executed twice. When this gesture is recognized the device is reinitialized.
+- Unknown click: This happens when the user triple-click or press-click-press in a way that does not fit in a single or double click. No action is associated to this gesture
+- Long press: When the button is pressed and not released for 3 seconds, the device is ordered to leave the network and start the commision process to join an open network again.
+
+Note the counter value is readable and writeable so it is possible to set the current value using zigbee front end
 
 ### NVS (Non-Volatile Storage)
 

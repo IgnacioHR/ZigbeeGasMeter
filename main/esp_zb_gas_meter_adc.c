@@ -110,7 +110,7 @@ void bat_continuous_adc_init(const adc_channel_t channel, adc_continuous_handle_
 // The task is deleted when the process finish
 void adc_task(void *arg)
 {
-    ESP_LOGI(TAG, "ADC Task Init...");
+    ESP_LOGI(TAG, "ADC task started");
     while (true) {
         ulTaskGenericNotifyTake(0, pdTRUE, portMAX_DELAY);
         ESP_LOGI(TAG, "Starting battery measures");
