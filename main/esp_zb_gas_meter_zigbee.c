@@ -377,16 +377,16 @@ esp_err_t zb_action_handler(esp_zb_core_action_callback_id_t callback_id, const 
     ESP_LOGI(TAG, "In zb_action_handler callback_id=0x%04x", callback_id);
     esp_err_t ret = ESP_OK;
     switch (callback_id) {
-    case ESP_ZB_CORE_REPORT_ATTR_CB_ID:
+    case ESP_ZB_CORE_REPORT_ATTR_CB_ID: // 0x2000
         ret = zb_attribute_reporting_handler((esp_zb_zcl_report_attr_message_t *)message);
         break;
-    case ESP_ZB_CORE_CMD_READ_ATTR_RESP_CB_ID:
+    case ESP_ZB_CORE_CMD_READ_ATTR_RESP_CB_ID: // 0x1000
         ret = zb_read_attr_resp_handler((esp_zb_zcl_cmd_read_attr_resp_message_t *)message);
         break;
-    case ESP_ZB_CORE_CMD_WRITE_ATTR_RESP_CB_ID:
+    case ESP_ZB_CORE_CMD_WRITE_ATTR_RESP_CB_ID: // 0x1001
         ret = zb_write_attr_resp_handler((esp_zb_zcl_cmd_write_attr_resp_message_t *)message);
         break;
-    case ESP_ZB_CORE_CMD_REPORT_CONFIG_RESP_CB_ID:
+    case ESP_ZB_CORE_CMD_REPORT_CONFIG_RESP_CB_ID: // 0x1002
         ret = zb_configure_report_resp_handler((esp_zb_zcl_cmd_config_report_resp_message_t *)message);
         break;
     case ESP_ZB_CORE_SET_ATTR_VALUE_CB_ID: // 0x0000 attribute value set
@@ -400,13 +400,13 @@ esp_err_t zb_action_handler(esp_zb_core_action_callback_id_t callback_id, const 
             gm_counter_set(setAtrMsg->attribute.data.value);
         }
         break;
-    case ESP_ZB_CORE_CMD_DEFAULT_RESP_CB_ID: // 4101
+    case ESP_ZB_CORE_CMD_DEFAULT_RESP_CB_ID: // 0x1005
         ret = zb_cmd_default_resp_handler((esp_zb_zcl_cmd_default_resp_message_t*)message);
         break;
     case ESP_ZB_CORE_OTA_UPGRADE_VALUE_CB_ID: // 0x0004
         ret = zb_ota_upgrade_status_handler(*(esp_zb_zcl_ota_upgrade_value_message_t *)message);
         break;
-    case ESP_ZB_CORE_OTA_UPGRADE_QUERY_IMAGE_RESP_CB_ID:
+    case ESP_ZB_CORE_OTA_UPGRADE_QUERY_IMAGE_RESP_CB_ID: // 0x0031
         ret = zb_ota_upgrade_query_image_resp_handler(*(esp_zb_zcl_ota_upgrade_query_image_resp_message_t *)message);
         break;
     default:
