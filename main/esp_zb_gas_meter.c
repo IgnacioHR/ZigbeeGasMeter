@@ -10,7 +10,6 @@
  * as you credit the original author(s) and share any derivatives under the same license.
  */
 #include <string.h>
-#include "esp_log.h"
 #include "esp_check.h"
 #include "driver/gpio.h"
 #include "nvs_flash.h"
@@ -24,6 +23,7 @@
 #include "esp_zb_gas_meter_adc.h"
 #include "esp_zb_gas_meter_zigbee.h"
 #include "esp_zb_gas_ota.h"
+#include "esp_zb_gas_led.h"
 
 /* Experimental, check if we sleepy device can help the design */
 #ifdef CONFIG_PM_ENABLE
@@ -396,6 +396,8 @@ TickType_t dm_deep_sleep_time_ms()
 // task to govern the deep sleep timeout
 void deep_sleep_controller_task(void *arg)
 {
+    ESP_LOGI(TAG, "Deep sleep task started");
+    led_off();
     while (true)
     {
         TickType_t new_timer_value;
@@ -541,6 +543,7 @@ void btn_task(void *arg)
         switch (state) {
             case PRESS:
                 ESP_LOGI(TAG, "Button press");
+                led_on();
                 xEventGroupSetBits(main_event_group_handle, SHALL_ENABLE_ZIGBEE);
                 if (deep_sleep_task_handle != NULL)
                 {
@@ -581,6 +584,7 @@ void btn_task(void *arg)
                 break;
             case NONE:
                 ESP_LOGI(TAG, "Button state reset");
+                led_off();
                 break;
             default:
                 ESP_LOGI(TAG, "Unknown button state");
@@ -1036,7 +1040,8 @@ void app_main(void)
     ESP_ERROR_CHECK(esp_zb_power_save_init());
     ESP_ERROR_CHECK(gm_counter_load_nvs());
     ESP_ERROR_CHECK(gm_deep_sleep_init());
-    // ESP_ERROR_CHECK(config_led());
+    ESP_ERROR_CHECK(config_led());
+    led_on();
 
     // start main loop
     ESP_ERROR_CHECK(xTaskCreate(gm_main_loop_task, "gas_meter_main", 8192, NULL, tskIDLE_PRIORITY, NULL) != pdPASS);

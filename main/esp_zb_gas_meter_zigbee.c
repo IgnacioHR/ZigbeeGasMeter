@@ -9,7 +9,6 @@
  * You may use, modify, and share this work for personal and non-commercial purposes, as long
  * as you credit the original author(s) and share any derivatives under the same license.
  */
-#include "esp_log.h"
 #include "esp_check.h"
 #include "freertos/FreeRTOS.h"
 #include "hal/ieee802154_ll.h"

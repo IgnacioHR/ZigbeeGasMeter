@@ -10,7 +10,6 @@
  * as you credit the original author(s) and share any derivatives under the same license.
  */
 #include <string.h>
-#include "esp_log.h"
 #include "esp_check.h"
 #include "driver/gpio.h"
 #include "freertos/FreeRTOS.h"
