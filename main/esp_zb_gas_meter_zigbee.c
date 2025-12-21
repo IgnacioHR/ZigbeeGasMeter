@@ -438,6 +438,20 @@ void zb_command_handler(esp_zb_zcl_command_send_status_message_t message)
 //     return false;
 // }
 
+// Update reporting information for the specified attribute
+esp_err_t update_reporting(esp_zb_zcl_attr_location_info_t *attr_location, uint32_t min_change)
+{
+    esp_zb_zcl_reporting_info_t *attr_reporting_info = esp_zb_zcl_find_reporting_info(*attr_location);
+    attr_reporting_info->u.send_info.max_interval = (uint16_t)MUST_SYNC_MINIMUM_TIME;
+    attr_reporting_info->u.send_info.min_interval = (uint16_t)(TIME_TO_SLEEP_ZIGBEE_ON / 2000UL);
+    esp_zb_uint48_t attr_reporting_delta = {
+        .low = min_change,
+        .high = 0
+    };
+    attr_reporting_info->u.send_info.delta.u48 = attr_reporting_delta;
+    return esp_zb_zcl_update_reporting_info(attr_reporting_info);
+}
+
 // initialize zigbee device
 void esp_zb_task(void *pvParameters) 
 {
@@ -691,11 +705,6 @@ void esp_zb_task(void *pvParameters)
     ESP_RETURN_ON_FALSE(ret == ESP_OK, , TAG, "Failed to register meter endpoint");
 
     esp_zb_core_action_handler_register(zb_action_handler);
-    // ESP_LOGI(TAG, "Registering additional callbacks");
-    // esp_zb_device_cb_id_handler_register(zb_device_cb_id);
-    // esp_zb_raw_command_handler_register(zb_raw_command_handler);
-    // esp_zb_zcl_command_send_status_handler_register(zb_command_handler);
-    // ESP_LOGI(TAG, "Additional callbacks registered");
 
     esp_zb_zcl_attr_location_info_t current_summation_delivered_location_info = {
         .attr_id = ESP_ZB_ZCL_ATTR_METERING_CURRENT_SUMMATION_DELIVERED_ID,
@@ -705,15 +714,7 @@ void esp_zb_task(void *pvParameters)
         .manuf_code = ESP_ZB_ZCL_ATTR_NON_MANUFACTURER_SPECIFIC
     };
     ESP_ERROR_CHECK(esp_zb_zcl_start_attr_reporting(current_summation_delivered_location_info));
-    esp_zb_zcl_reporting_info_t *current_summation_reporting_info = esp_zb_zcl_find_reporting_info(current_summation_delivered_location_info);
-    current_summation_reporting_info->u.send_info.max_interval = (uint16_t)MUST_SYNC_MINIMUM_TIME;
-    current_summation_reporting_info->u.send_info.min_interval = TIME_TO_SLEEP_ZIGBEE_ON / 2000;
-    esp_zb_uint48_t current_summation_reporting_delta = {
-        .low = COUNTER_REPORT_DIFF,
-        .high = 0
-    };
-    current_summation_reporting_info->u.send_info.delta.u48 = current_summation_reporting_delta;
-    esp_zb_zcl_update_reporting_info(current_summation_reporting_info);
+    ESP_ERROR_CHECK(update_reporting(&current_summation_delivered_location_info, (uint32_t)COUNTER_REPORT_DIFF));
 
     esp_zb_zcl_attr_location_info_t instantaneous_demand_location_info = {
         .attr_id = ESP_ZB_ZCL_ATTR_METERING_INSTANTANEOUS_DEMAND_ID,
@@ -723,6 +724,7 @@ void esp_zb_task(void *pvParameters)
         .manuf_code = ESP_ZB_ZCL_ATTR_NON_MANUFACTURER_SPECIFIC
     };
     ESP_ERROR_CHECK(esp_zb_zcl_start_attr_reporting(instantaneous_demand_location_info));
+    ESP_ERROR_CHECK(update_reporting(&instantaneous_demand_location_info, 0));
 
     esp_zb_zcl_attr_location_info_t  percentage_location_info = {
         .attr_id = ESP_ZB_ZCL_ATTR_POWER_CONFIG_BATTERY_PERCENTAGE_REMAINING_ID,
@@ -732,6 +734,7 @@ void esp_zb_task(void *pvParameters)
         .manuf_code = ESP_ZB_ZCL_ATTR_NON_MANUFACTURER_SPECIFIC
     };
     ESP_ERROR_CHECK(esp_zb_zcl_start_attr_reporting(percentage_location_info));
+    ESP_ERROR_CHECK(update_reporting(&percentage_location_info, 0));
 
     esp_zb_zcl_attr_location_info_t  battery_alarm_state_location_info = {
         .attr_id = ESP_ZB_ZCL_ATTR_POWER_CONFIG_BATTERY_ALARM_STATE_ID,
@@ -741,6 +744,7 @@ void esp_zb_task(void *pvParameters)
         .manuf_code = ESP_ZB_ZCL_ATTR_NON_MANUFACTURER_SPECIFIC
     };
     ESP_ERROR_CHECK(esp_zb_zcl_start_attr_reporting(battery_alarm_state_location_info));
+    ESP_ERROR_CHECK(update_reporting(&battery_alarm_state_location_info, 0));
 
     esp_zb_zcl_attr_location_info_t status_location_info = {
         .attr_id = ESP_ZB_ZCL_ATTR_METERING_STATUS_ID,
@@ -750,6 +754,7 @@ void esp_zb_task(void *pvParameters)
         .manuf_code = ESP_ZB_ZCL_ATTR_NON_MANUFACTURER_SPECIFIC
     };
     ESP_ERROR_CHECK(esp_zb_zcl_start_attr_reporting(status_location_info));
+    ESP_ERROR_CHECK(update_reporting(&status_location_info, 0));
 
     esp_zb_zcl_attr_location_info_t extended_status_location_info = {
         .attr_id = ESP_ZB_ZCL_ATTR_METERING_EXTENDED_STATUS_ID,
@@ -759,6 +764,7 @@ void esp_zb_task(void *pvParameters)
         .manuf_code = ESP_ZB_ZCL_ATTR_NON_MANUFACTURER_SPECIFIC
     };
     ESP_ERROR_CHECK(esp_zb_zcl_start_attr_reporting(extended_status_location_info));
+    ESP_ERROR_CHECK(update_reporting(&extended_status_location_info, 0));
 
     esp_zb_zcl_attr_location_info_t analog_status_location_info = {
         .attr_id = ESP_ZB_ZCL_ATTR_ANALOG_INPUT_PRESENT_VALUE_ID,
@@ -768,6 +774,7 @@ void esp_zb_task(void *pvParameters)
         .manuf_code = ESP_ZB_ZCL_ATTR_NON_MANUFACTURER_SPECIFIC
     };
     ESP_ERROR_CHECK(esp_zb_zcl_start_attr_reporting(analog_status_location_info));
+    ESP_ERROR_CHECK(update_reporting(&analog_status_location_info, (uint32_t)COUNTER_REPORT_DIFF));
 
     esp_zb_set_tx_power(IEEE802154_TXPOWER_VALUE_MAX);
     ESP_ERROR_CHECK(esp_zb_set_primary_network_channel_set(ESP_ZB_PRIMARY_CHANNEL_MASK));
