@@ -34,7 +34,7 @@ esp_zb_uint48_t current_summation_delivered = {
 	.low = 0,
 	.high = 0
 };
-float current_summation_delivered_float = 0;
+
 uint8_t device_status = 0x0;
 uint64_t device_extended_status = 0x0;
 esp_zb_int24_t instantaneous_demand = {
@@ -225,13 +225,6 @@ esp_zb_zcl_status_t zb_radio_setup_report_values(EventBits_t uxBits)
             ESP_LOGE(TAG, "Updating value of current summation delivered: 0x%04x", status);
             return status;
         }
-        status = esp_zb_zcl_set_attribute_val(MY_METERING_ENDPOINT,
-            ESP_ZB_ZCL_CLUSTER_ID_ANALOG_INPUT, ESP_ZB_ZCL_CLUSTER_SERVER_ROLE,
-            ESP_ZB_ZCL_ATTR_ANALOG_INPUT_PRESENT_VALUE_ID, &current_summation_delivered_float, false);
-        if (status != ESP_ZB_ZCL_STATUS_SUCCESS) {
-            ESP_LOGE(TAG, "Updating float value of current summation delivered: 0x%04x", status);
-            return status;
-        }
     }
     if ((uxBits & INSTANTANEOUS_DEMAND_REPORT) == INSTANTANEOUS_DEMAND_REPORT) {
         status = esp_zb_zcl_set_attribute_val(MY_METERING_ENDPOINT,
@@ -306,14 +299,6 @@ esp_zb_zcl_status_t zb_radio_send_values(EventBits_t uxBits)
             return status;
         }
         ESP_LOGI(TAG, "CurrentSummationDelivered reported");
-        report_attr_cmd.clusterID = ESP_ZB_ZCL_CLUSTER_ID_ANALOG_INPUT;
-        report_attr_cmd.attributeID = ESP_ZB_ZCL_ATTR_ANALOG_INPUT_PRESENT_VALUE_ID;
-        status = esp_zb_zcl_report_attr_cmd_req(&report_attr_cmd);
-        if (status != ESP_ZB_ZCL_STATUS_SUCCESS) {
-            ESP_LOGE(TAG, "Sending report float value of current summation delivered: 0x%04x", status);
-            return status;
-        }
-        ESP_LOGI(TAG, "CurrentSummationDelivered float reported");
     }
 
     if ((uxBits & INSTANTANEOUS_DEMAND_REPORT) == INSTANTANEOUS_DEMAND_REPORT) {
@@ -642,27 +627,6 @@ void esp_zb_task(void *pvParameters)
                                         ESP_ZB_ZCL_ATTR_ACCESS_READ_ONLY,
                                         &demand_formatting));
 
-
-    /* analog input cluster, used to replicate the counter in an unitless manner*/
-    esp_zb_analog_input_cluster_cfg_t analog_in_cfg = {
-        .out_of_service = ESP_ZB_ZCL_ANALOG_INPUT_OUT_OF_SERVICE_DEFAULT_VALUE,
-        .status_flags = ESP_ZB_ZCL_ANALOG_INPUT_STATUS_FLAG_DEFAULT_VALUE,
-        .present_value = current_summation_delivered_float};
-    esp_zb_attribute_list_t *analog_in_cluster = esp_zb_analog_input_cluster_create(&analog_in_cfg);
-    float min_ai_val = 0; 
-    float max_ai_val = 16777216;
-    float resolution = 0.01f;
-    uint16_t no_units = 0x005f;
-    esp_zb_zcl_analog_input_reliability_value_t reliability = ESP_ZB_ZCL_ANALOG_INPUT_RELIABILITY_NO_FAULT_DETECTED;
-    esp_zb_zcl_ai_count_unitless_t app_type = ESP_ZB_ZCL_AI_COUNT_UNITLESS_COUNT;
-    ESP_ERROR_CHECK(esp_zb_analog_input_cluster_add_attr(analog_in_cluster, ESP_ZB_ZCL_ATTR_ANALOG_INPUT_DESCRIPTION_ID, "\x0E""Gas consuption"));
-    ESP_ERROR_CHECK(esp_zb_analog_input_cluster_add_attr(analog_in_cluster, ESP_ZB_ZCL_ATTR_ANALOG_INPUT_MAX_PRESENT_VALUE_ID, &max_ai_val));
-    ESP_ERROR_CHECK(esp_zb_analog_input_cluster_add_attr(analog_in_cluster, ESP_ZB_ZCL_ATTR_ANALOG_INPUT_MIN_PRESENT_VALUE_ID, &min_ai_val));
-    ESP_ERROR_CHECK(esp_zb_analog_input_cluster_add_attr(analog_in_cluster, ESP_ZB_ZCL_ATTR_ANALOG_INPUT_ENGINEERING_UNITS_ID, &no_units));
-    ESP_ERROR_CHECK(esp_zb_analog_input_cluster_add_attr(analog_in_cluster, ESP_ZB_ZCL_ATTR_ANALOG_INPUT_APPLICATION_TYPE_ID, &app_type));
-    ESP_ERROR_CHECK(esp_zb_analog_input_cluster_add_attr(analog_in_cluster, ESP_ZB_ZCL_ATTR_ANALOG_INPUT_RESOLUTION_ID, &resolution));
-    ESP_ERROR_CHECK(esp_zb_analog_input_cluster_add_attr(analog_in_cluster, ESP_ZB_ZCL_ATTR_ANALOG_INPUT_RELIABILITY_ID, &reliability));
-
     /* client identify cluster */
     esp_zb_attribute_list_t *esp_zb_identify_client_cluster = esp_zb_zcl_attr_list_create(ESP_ZB_ZCL_CLUSTER_ID_IDENTIFY);
 
@@ -690,7 +654,6 @@ void esp_zb_task(void *pvParameters)
     ESP_ERROR_CHECK(esp_zb_cluster_list_add_metering_cluster(esp_zb_meter_cluster_list, esp_zb_metering_server_cluster, ESP_ZB_ZCL_CLUSTER_SERVER_ROLE));
     ESP_ERROR_CHECK(esp_zb_cluster_list_add_power_config_cluster(esp_zb_meter_cluster_list, esp_zb_power_cluster, ESP_ZB_ZCL_CLUSTER_SERVER_ROLE));
     ESP_ERROR_CHECK(esp_zb_cluster_list_add_ota_cluster(esp_zb_meter_cluster_list, esp_zb_ota_cluster, ESP_ZB_ZCL_CLUSTER_CLIENT_ROLE));
-    ESP_ERROR_CHECK(esp_zb_cluster_list_add_analog_input_cluster(esp_zb_meter_cluster_list, analog_in_cluster, ESP_ZB_ZCL_CLUSTER_SERVER_ROLE));
 
     esp_zb_ep_list_t *esp_zb_ep_meter_list = esp_zb_ep_list_create();
     esp_zb_endpoint_config_t endpoint_config = {
@@ -765,16 +728,6 @@ void esp_zb_task(void *pvParameters)
     };
     ESP_ERROR_CHECK(esp_zb_zcl_start_attr_reporting(extended_status_location_info));
     ESP_ERROR_CHECK(update_reporting(&extended_status_location_info, 0));
-
-    esp_zb_zcl_attr_location_info_t analog_status_location_info = {
-        .attr_id = ESP_ZB_ZCL_ATTR_ANALOG_INPUT_PRESENT_VALUE_ID,
-        .cluster_id = ESP_ZB_ZCL_CLUSTER_ID_ANALOG_INPUT,
-        .cluster_role = ESP_ZB_ZCL_CLUSTER_SERVER_ROLE,
-        .endpoint_id = MY_METERING_ENDPOINT,
-        .manuf_code = ESP_ZB_ZCL_ATTR_NON_MANUFACTURER_SPECIFIC
-    };
-    ESP_ERROR_CHECK(esp_zb_zcl_start_attr_reporting(analog_status_location_info));
-    ESP_ERROR_CHECK(update_reporting(&analog_status_location_info, (uint32_t)COUNTER_REPORT_DIFF));
 
     esp_zb_set_tx_power(IEEE802154_TXPOWER_VALUE_MAX);
     ESP_ERROR_CHECK(esp_zb_set_primary_network_channel_set(ESP_ZB_PRIMARY_CHANNEL_MASK));

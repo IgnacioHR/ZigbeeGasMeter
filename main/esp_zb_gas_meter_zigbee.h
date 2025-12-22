@@ -29,7 +29,6 @@
 
 // Measure current summation delivered
 extern esp_zb_uint48_t current_summation_delivered;
-extern float current_summation_delivered_float;
 extern bool leaving_network;
 
 // device status and extended status

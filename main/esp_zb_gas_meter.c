@@ -122,7 +122,6 @@ esp_err_t gm_counter_load_nvs()
         {
             current_summation_delivered.low = saved_count & 0x00000000FFFFFFFF;
             current_summation_delivered.high = (saved_count & 0x0000FFFF00000000) >> 32;
-            current_summation_delivered_float = (float)(saved_count / 100.f);
             ESP_LOGI(TAG, "Counter loaded: low=%lu high=%u", current_summation_delivered.low, current_summation_delivered.high);
         }
         else
@@ -181,7 +180,6 @@ void gm_counter_set(const esp_zb_uint48_t *new_value)
     uint64_t current_summation_64 = current_summation_delivered.high;
     current_summation_64 <<= 32;
     current_summation_64 |= current_summation_delivered.low;
-    current_summation_delivered_float = (float)(current_summation_64 / 100.f);
     xEventGroupSetBits(report_event_group_handle, CURRENT_SUMMATION_DELIVERED_REPORT);
     xTaskNotifyGive(save_counter_task_handle);
 }
@@ -339,7 +337,6 @@ void gm_counter_increment(const struct timeval *now, bool fromISR)
     uint64_t current_summation_64 = current_summation_delivered.high;
     current_summation_64 <<= 32;
     current_summation_64 |= current_summation_delivered.low;
-    current_summation_delivered_float = (float)(current_summation_64 / 100.f);
     if (fromISR)
     {
         BaseType_t mustYield = pdFALSE;
