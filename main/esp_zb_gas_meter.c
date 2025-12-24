@@ -92,9 +92,9 @@ TimerHandle_t timer_since_release_handler = NULL;
 
 TaskHandle_t btn_task_handle = NULL;
 
-#define CLICK_PRESS_TIME_MS       250    // MUST BE BIGGER THAN 150
+#define CLICK_PRESS_TIME_MS       400    // MUST BE BIGGER THAN 150
 #define CLICK_HOLD_TIME_MS       3000
-#define CLICK_RELEASE_TIME_MS     250
+#define CLICK_RELEASE_TIME_MS     400
 
 typedef enum ButtonState_e {
     NONE = 0,
