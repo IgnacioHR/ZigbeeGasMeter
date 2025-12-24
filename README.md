@@ -5,11 +5,14 @@ This project is a DIY Zigbee-enabled gas meter that measures and tracks gas cons
 ## Features
 
 - Real-time gas consumption tracking in cubic meters (m³).
+- Real-time gas flow tracking in cubit meters per hour (m³/h)
 - Zigbee communication for seamless integration with Zigbee2MQTT and Home Assistant.
 - Battery-powered for installation flexibility.
+- Double battery connector to allow battery replacement without counting interruption.
 - Built-in counter to prevent data loss if the network or Home Assistant goes offline.
 - Easy setup and minimal hardware requirements.
-- OTA firmware update.
+- OTA firmware updatable.
+- Device button with rich functionality 
 
 ## Why Zigbee for DIY Projects?
 
@@ -43,6 +46,18 @@ Before this project, I used a modified door sensor to monitor gas usage. While f
 After searching for commercial Zigbee gas meters and finding none, I decided to create a custom device tailored to my needs.
 
 ![Old device](images/small_gas_counter.png)
+
+## Device button functionality
+
+The device button has implemented gesture recognition. The gestures signaled are PRESS, RELEASE, SINGLE_CLICK, DOUBLE_CLICK and HOLD. In the code there are more gestures such as NONE (No current gesture set) and UNKNOWN_CLICK (set when failing to recognize any of the properly defined gestures).
+
+Once a gesture is recognized, the functionality attached, if any, is raised:
+
+- PRESS: The button is pressed. The internal led is switched on. Zigbee radio is enabled.
+- SINGLE_CLICK: The button is pressed and released in less than 400ms and not pressed again in 400ms. Force report of the Current Summation Delivered, Battery percentage, Status and extended Status registers. The Battery voltage is updated internally at this time. Note it is not reported because it is not possible in the Zigbee specifications.
+- DOUBLE_CLICK: The button is pressed and releasses in less than 400ms, then pressed again in less than 400ms and released in less than 400ms and not pressed in less than 400ms. The device is restarted (counter is not reset)
+- HOLD: The button is keep pressed for 3 seconds. The device leaves the network and starts comission process to find another network.
+- NONE: The led is turned off, note the led is turned off for multiple other causes such as entering sleep mode etc.
 
 ## Project Status
 
