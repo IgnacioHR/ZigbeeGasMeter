@@ -30,8 +30,14 @@
 uint8_t battery_voltage = 0;
 uint8_t battery_percentage = 0;
 uint32_t battery_alarm_state = 0;
-uint8_t battery_voltage_min = 27;
-uint8_t battery_voltage_th1 = 30;
+
+#define M                       (MAX_BATTERY_VOLTAGE / ADC_MAX_VALUE)
+#define ADC_MIN_VALUE           (((double)MIN_BATTERY_VOLTAGE)/M)
+#define TO_PERCENTAGE           (200.0 / (ADC_MAX_VALUE - ADC_MIN_VALUE))
+
+// required by the Zigbee power cluster attributes
+uint8_t battery_voltage_min = UINT8_C(MIN_BATTERY_VOLTAGE/100);
+uint8_t battery_voltage_th1 = UINT8_C(WARN_BATTERY_VOLTAGE/100);
 
 struct timeval last_battery_measurement_time;
 
@@ -40,9 +46,9 @@ adc_continuous_handle_t handle = NULL;
 
 void set_battery_unavailable()
 {
-    battery_alarm_state |= (1 << 2); // Battery unavailable bit set
+    battery_alarm_state |= ESP_ZB_ZCL_POWER_CONFIG_MAINS_ALARM_MASK_VOLTAGE_UNAVAIL; // Battery unavailable bit set
     ESP_LOGE(TAG, "Battery marked unavailable");
-    xEventGroupSetBits(report_event_group_handle, STATUS_REPORT);
+    xEventGroupSetBits(report_event_group_handle, BATTERY_REPORT);
 }
 
 // Hardware configuration of ADC related pins
@@ -143,7 +149,7 @@ void adc_task(void *arg)
     while (true) {
         ulTaskGenericNotifyTake(0, pdTRUE, portMAX_DELAY);
         esp_err_t error = ESP_OK;
-        if (is_first_loop && (battery_alarm_state & 0x02) == 0x02) {
+        if (is_first_loop && (battery_alarm_state & ESP_ZB_ZCL_POWER_CONFIG_MAINS_ALARM_MASK_VOLTAGE_UNAVAIL) == ESP_ZB_ZCL_POWER_CONFIG_MAINS_ALARM_MASK_VOLTAGE_UNAVAIL) {
             ESP_LOGI(TAG, "Battery measuremenet operation cancelled, battery unavailable");
             continue;
         }
@@ -220,24 +226,28 @@ void adc_task(void *arg)
                 error = adc_cali_raw_to_voltage(adc1_cali_chan0_handle, average, &voltage); // voltage in millivolts
                 if (error == ESP_OK) {
                     // convert to 1s li-ion range
-                    float bat_voltage = (float)(1.273)*voltage + (float)0.01; // in millivolts
-                    battery_voltage = (uint8_t)(bat_voltage/100.0f+0.5f); // Zigbee Specification, one byte, 0x00 to 0xff, in units of 100mv
-                    battery_percentage = (uint8_t)(((float)average-1880.0f)*0.140845f); // from 0 to 200
-                    if (battery_percentage > 200)
+                    float bat_voltage = (float)(voltage * MAX_BATTERY_VOLTAGE / ADC_MAX_VALUE); // battery voltage from adc readings in millivolts, range to 4200 mv
+                    battery_voltage = (uint8_t)(bat_voltage/100.0+0.5); // Zigbee Specification, one byte, 0x00 to 0xff, in units of 100mv
+                    battery_percentage = (uint8_t)(((float)average - ADC_MIN_VALUE)*TO_PERCENTAGE); // from 0 to 200
+                    if (battery_percentage > 200) {
                         battery_percentage = 200;
+                        battery_alarm_state |= ESP_ZB_ZCL_POWER_CONFIG_MAINS_ALARM_MASK_VOLTAGE_HIGH;
+                        xEventGroupSetBits(report_event_group_handle, BATTERY_REPORT);
+                    } else {
+                        battery_alarm_state &= ~ESP_ZB_ZCL_POWER_CONFIG_MAINS_ALARM_MASK_VOLTAGE_HIGH;
+                        xEventGroupSetBits(report_event_group_handle, BATTERY_REPORT);
+                    }
                     xEventGroupSetBits(report_event_group_handle, BATTERY_REPORT);
-                    if ((battery_alarm_state & 0x02) == 0x02) {
-                        battery_alarm_state &= ~0x02; // reset battery alarm state
+                    if ((battery_alarm_state & ESP_ZB_ZCL_POWER_CONFIG_MAINS_ALARM_MASK_VOLTAGE_UNAVAIL) == ESP_ZB_ZCL_POWER_CONFIG_MAINS_ALARM_MASK_VOLTAGE_UNAVAIL) {
+                        battery_alarm_state &= ~ESP_ZB_ZCL_POWER_CONFIG_MAINS_ALARM_MASK_VOLTAGE_UNAVAIL; // reset battery alarm state
+                        xEventGroupSetBits(report_event_group_handle, BATTERY_REPORT);
                     }
-                    if (battery_voltage < battery_voltage_th1) {
-                        battery_alarm_state |= (1 << 1); // BatteryVoltageThreshold1 or BatteryPercentageThreshold1 reached for Battery Source 1
+                    if (voltage < WARN_BATTERY_VOLTAGE) {
+                        battery_alarm_state |= ESP_ZB_ZCL_POWER_CONFIG_MAINS_ALARM_MASK_VOLTAGE_LOW; // BatteryVoltageMinThreshold or BatteryPercentageMinThreshold reached for Battery Source 1
+                        xEventGroupSetBits(report_event_group_handle, BATTERY_REPORT);
                     } else {
-                        battery_alarm_state &= ~(1 << 1);
-                    }
-                    if (battery_voltage < battery_voltage_min) {
-                        battery_alarm_state |= (1 << 0); // BatteryVoltageMinThreshold or BatteryPercentageMinThreshold reached for Battery Source 1
-                    } else {
-                        battery_alarm_state &= ~(1 << 0);
+                        battery_alarm_state &= ~ESP_ZB_ZCL_POWER_CONFIG_MAINS_ALARM_MASK_VOLTAGE_LOW;
+                        xEventGroupSetBits(report_event_group_handle, BATTERY_REPORT);
                     }
                     if (battery_alarm_state != 0 && (device_status & ESP_ZB_ZCL_METERING_GAS_LOW_BATTERY) == 0) {
                         device_status |= ESP_ZB_ZCL_METERING_GAS_LOW_BATTERY;
@@ -248,7 +258,7 @@ void adc_task(void *arg)
                     }
 
                     ESP_LOGI(TAG, "Raw: %"PRIu32" Calibrated: %"PRId16"mV Bat Voltage: %1.2fv ZB Voltage: %d ZB Percentage: %d Alarm 0x%lx", 
-                        average, voltage, bat_voltage/(float)(1000.0), battery_voltage, battery_percentage, battery_alarm_state);
+                        average, voltage, bat_voltage/1000.0f, battery_voltage, battery_percentage, battery_alarm_state);
                     gettimeofday(&last_battery_measurement_time, NULL);
                 } else {
                     ESP_LOGE(TAG, "ADC Task ESP_ERR_TIMEOUT");

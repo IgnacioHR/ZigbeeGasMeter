@@ -18,7 +18,7 @@
 #include "esp_zigbee_core.h"
 
 // OTA
-uint16_t zigbee_zcl_version = 0x0008;
+uint16_t zigbee_zcl_version = ESP_ZB_ZCL_BASIC_ZCL_VERSION_DEFAULT_VALUE;
 uint16_t zigbee_stack_version = 0x0002;
 uint8_t hw_version = HARDWARE_VERSION;
 

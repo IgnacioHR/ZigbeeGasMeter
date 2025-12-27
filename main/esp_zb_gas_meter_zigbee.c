@@ -48,11 +48,11 @@ uint64_t last_summation_sent = 0;
 // value for the ESP_ZB_ZCL_ATTR_IDENTIFY_IDENTIFY_TIME_ID attribute
 uint16_t identify_time = 0;
 
-uint8_t battery_alarm_mask = 0x03;
+uint8_t battery_alarm_mask = ESP_ZB_ZCL_POWER_CONFIG_MAINS_ALARM_MASK_VOLTAGE_LOW | ESP_ZB_ZCL_POWER_CONFIG_MAINS_ALARM_MASK_VOLTAGE_HIGH | ESP_ZB_ZCL_POWER_CONFIG_MAINS_ALARM_MASK_VOLTAGE_UNAVAIL;
 
-uint8_t battery_voltage_rated = 74;
+uint8_t battery_voltage_rated = RATED_BATTERY_VOLTAGE / 100;
 
-uint8_t battery_quantity = 2;
+uint8_t battery_quantity = BATTERY_UNITS;
 
 // value for the manufacturer_code, At this time this is whatever value 
 // I've never seen before. I don't know if there is a value for DIY devices
@@ -466,7 +466,7 @@ void esp_zb_task(void *pvParameters)
 
     esp_zb_basic_cluster_cfg_t basic_cfg = {
         .zcl_version = zigbee_zcl_version,
-        .power_source = 0x03,
+        .power_source = ESP_ZB_ZCL_BASIC_POWER_SOURCE_BATTERY,
     };
 
     esp_zb_attribute_list_t *esp_zb_basic_cluster = esp_zb_basic_cluster_create(&basic_cfg);
@@ -500,11 +500,11 @@ void esp_zb_task(void *pvParameters)
 
     /* power cluster */
     esp_zb_power_config_cluster_cfg_t power_cfg = {
-        .main_voltage = 74,
+        .main_voltage = 0,
         .main_freq = 0,
-        .main_alarm_mask = 0x03,
-        .main_voltage_min = 70,
-        .main_voltage_max = 84,
+        .main_alarm_mask = 0x00,
+        .main_voltage_min = 0,
+        .main_voltage_max = 0,
         .main_voltage_dwell = MUST_SYNC_MINIMUM_TIME
     };
 
