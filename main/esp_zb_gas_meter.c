@@ -903,16 +903,6 @@ esp_err_t gm_gpio_interrup_init()
     ESP_RETURN_ON_ERROR(gpio_isr_handler_add(PULSE_PIN, gpio_pulse_isr_handler, NULL), TAG, "Can't add PULSE_PIN interrupt handler");
     ESP_RETURN_ON_ERROR(gpio_isr_handler_add(MAIN_BTN, gpio_btn_isr_handler, NULL), TAG, "Can't add MAIN_BTN interrupt handler");
 
-    // Enable voltage measure enable output pin
-    uint64_t bat_volt_enable_pin = 1ULL << BAT_MON_ENABLE;
-    gpio_config_t voltage_enable_conf = {
-        .intr_type = GPIO_INTR_DISABLE,
-        .mode = GPIO_MODE_OUTPUT,
-        .pin_bit_mask = bat_volt_enable_pin,
-        .pull_down_en = GPIO_PULLDOWN_DISABLE,
-        .pull_up_en = GPIO_PULLUP_DISABLE};
-    ESP_RETURN_ON_ERROR(gpio_config(&voltage_enable_conf), TAG, "Can't config gpio for BAT_MON_ENABLE pin");
-
     return ESP_OK;
 }
 

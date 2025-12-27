@@ -14,9 +14,6 @@
 
 extern const char *TAG;
 
-// output - pin to enable battery voltage to the adc converter
-#define BAT_MON_ENABLE                  		GPIO_NUM_21
-
 // Report event group events
 #define CURRENT_SUMMATION_DELIVERED_REPORT  (EventBits_t)(1 << 0)
 #define INSTANTANEOUS_DEMAND_REPORT         (EventBits_t)(1 << 1)
